@@ -45,3 +45,6 @@ Scan data/
 
 # Local-only logs
 *.log
+
+# Experiment results — regenerated each run; truth is in debug/ground_truth/
+debug/results/
