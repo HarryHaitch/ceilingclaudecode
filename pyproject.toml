@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ceiling-rcp"
+version = "0.1.0"
+description = "Reflected Ceiling Plan generator from a Polycam mesh: down-facing plane segmentation, periodic-feature merging, editable footprint and ceiling-plane polygons."
+authors = [{ name = "H2 Engineering", email = "haris@h2engineering.com.au" }]
+requires-python = ">=3.10"
+readme = "README.md"
+
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.11",
+    "shapely>=2.0",
+    "opencv-python>=4.8",
+    "pillow>=10",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "python-multipart>=0.0.9",
+    "matplotlib>=3.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "matplotlib>=3.7",
+]
+
+[project.scripts]
+ceiling-rcp = "ceiling_rcp.cli:main"
+ceiling-rcp-server = "ceiling_rcp.server:main"
+ceiling-rcp-init = "ceiling_rcp.init_session:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+ceiling_rcp = ["static/*.html", "static/*.js", "static/*.css", "py.typed"]

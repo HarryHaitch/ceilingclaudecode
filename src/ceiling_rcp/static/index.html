@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ceiling-rcp</title>
+  <link rel="stylesheet" href="style.css?v=8">
+</head>
+<body>
+  <header>
+    <h1>ceiling-rcp</h1>
+    <span id="session-label" class="muted">no session</span>
+    <span class="spacer"></span>
+    <button id="btn-export" disabled>Export plan</button>
+  </header>
+
+  <main>
+    <aside id="sidebar">
+      <section id="upload-section">
+        <h2>1. Upload scan</h2>
+        <p class="muted">For best reliability, run
+          <code>ceiling-rcp-init &lt;folder&gt;</code> from a terminal and open
+          the printed URL — that bypasses Safari's file-picker quirks. The
+          web upload below is a fallback.</p>
+        <input type="file" id="file-input"
+               multiple webkitdirectory directory mozdirectory
+               style="display:none">
+        <input type="file" id="file-input-flat" multiple style="display:none">
+        <div class="row">
+          <button id="btn-pick-folder" class="primary">Pick folder…</button>
+          <button id="btn-pick-files">Pick files…</button>
+        </div>
+        <div id="upload-report" class="report"></div>
+      </section>
+
+      <section id="workflow" hidden>
+        <h2>2. Trace polygons</h2>
+        <ol class="workflow">
+          <li id="step-room"  class="active">
+            <button id="btn-room"  class="step-btn">Trace room outline</button>
+            <div class="step-status muted">Click vertices, then click the first one (or press Enter) to close.</div>
+          </li>
+          <li id="step-main"  class="locked">
+            <button id="btn-main" class="step-btn" disabled>Trace main ceiling</button>
+            <div class="step-status muted">Defines the height datum — its average height becomes 0 mm.</div>
+          </li>
+          <li id="step-region" class="locked">
+            <button id="btn-region" class="step-btn" disabled>Add ceiling region</button>
+            <div class="step-status muted">Recesses → +mm above main; bulkheads → −mm below main.</div>
+          </li>
+        </ol>
+
+        <button id="btn-autodetect" class="step-btn primary" disabled
+                style="margin-top:8px;">Auto-detect from height map</button>
+        <p class="muted hint">
+          Replaces main + regions with up to 5 height-clustered planes
+          covering 100% of the room outline. Run after drawing the room.
+        </p>
+
+        <p class="help-blurb">
+          <b>What the colour shading means:</b> inside each polygon, every
+          pixel is tinted by how far its scanned height sits above (lighter)
+          or below (darker) that polygon's own average. A polygon that
+          looks evenly tinted is a flat plane; obvious light/dark patches
+          inside one polygon mean it has clipped a bulkhead or recess —
+          shrink the polygon or split it.
+        </p>
+
+        <h3>Tools</h3>
+        <div class="tools">
+          <button data-tool="select"        class="tool active">Select / drag</button>
+          <button data-tool="insert-vertex" class="tool">Insert vertex</button>
+          <button data-tool="delete-vertex" class="tool">Delete vertex</button>
+          <button data-tool="cancel-draw"   class="tool" disabled>Cancel draw</button>
+        </div>
+        <p class="muted hint" id="tool-hint">Click a vertex to drag.</p>
+
+        <h2>3. Tidy borders</h2>
+        <button id="btn-snap" class="step-btn primary">Snap polygons</button>
+        <p class="muted hint">
+          Pushes / pulls every polygon so they share clean borders inside
+          the room — no gaps, no overlap. Main ceiling fills any space
+          regions don't claim.
+        </p>
+
+        <h2>4. Export</h2>
+        <button id="btn-pdf" class="step-btn primary">Download PDF</button>
+        <p class="muted hint">
+          Coloured masks, relative-height tags on each polygon, and
+          dimensioned room outline.
+        </p>
+
+        <h3>Polygons</h3>
+        <ul id="polygons-list"></ul>
+
+        <h3>Selected</h3>
+        <div id="selection-info" class="muted">Nothing selected</div>
+      </section>
+    </aside>
+
+    <div id="canvas-wrap">
+      <canvas id="canvas"></canvas>
+      <div id="readout"></div>
+      <div id="banner"></div>
+    </div>
+  </main>
+
+  <script src="app.js?v=8"></script>
+</body>
+</html>

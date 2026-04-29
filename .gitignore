@@ -1,0 +1,44 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# User-upload sessions: rebuilt with `ceiling-rcp-init`, never committed.
+sessions/
+
+# CLI debug outputs
+out_*/
+
+# Height-map artefacts inside sessions or anywhere else
+*.npy
+
+# Scan inputs are large (~1.5 GB) and live outside source control.
+# Track which scans you've used in README or docs/, not the raw bytes.
+Scan data/
+
+# Claude tooling state
+.claude/
+
+# Local-only logs
+*.log
