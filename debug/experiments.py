@@ -62,6 +62,32 @@ EXPERIMENTS: list[dict[str, Any]] = [
     {"name": "wall_constrained_010",      "algo": "wall_constrained", "kwargs": {"min_cell_px_m2": 0.10}},
     {"name": "wall_constrained_030",      "algo": "wall_constrained", "kwargs": {"min_cell_px_m2": 0.30}},
     {"name": "wall_constrained_060",      "algo": "wall_constrained", "kwargs": {"min_cell_px_m2": 0.60}},
+
+    # round 2 — fine-tune around the s200 winner
+    {"name": "felzenszwalb_s150",         "algo": "felzenszwalb",     "kwargs": {"scale": 150}},
+    {"name": "felzenszwalb_s175",         "algo": "felzenszwalb",     "kwargs": {"scale": 175}},
+    {"name": "felzenszwalb_s225",         "algo": "felzenszwalb",     "kwargs": {"scale": 225}},
+    {"name": "felzenszwalb_s250",         "algo": "felzenszwalb",     "kwargs": {"scale": 250}},
+
+    # round 2 — felzenszwalb + same-height merge post-pass
+    {"name": "felz_merged_s200_2cm",      "algo": "felzenszwalb_merged", "kwargs": {"scale": 200, "merge_threshold_m": 0.02}},
+    {"name": "felz_merged_s200_3cm",      "algo": "felzenszwalb_merged", "kwargs": {"scale": 200, "merge_threshold_m": 0.03}},
+    {"name": "felz_merged_s200_5cm",      "algo": "felzenszwalb_merged", "kwargs": {"scale": 200, "merge_threshold_m": 0.05}},
+    {"name": "felz_merged_s400_3cm",      "algo": "felzenszwalb_merged", "kwargs": {"scale": 400, "merge_threshold_m": 0.03}},
+
+    # round 2 — multi-channel watershed (height + texture + walls)
+    {"name": "watershed_default",         "algo": "watershed_multi",  "kwargs": {}},
+    {"name": "watershed_high_wall",       "algo": "watershed_multi",  "kwargs": {"wall_weight": 4.0}},
+    {"name": "watershed_no_texture",      "algo": "watershed_multi",  "kwargs": {"texture_weight": 0.0}},
+    {"name": "watershed_high_texture",    "algo": "watershed_multi",  "kwargs": {"texture_weight": 1.5}},
+
+    # round 2 — region growing with texture-edge gating
+    {"name": "region_growing_tex_3cm",    "algo": "region_growing_texture", "kwargs": {"threshold_m": 0.03}},
+
+    # round 2 — SLIC superpixels merged by height
+    {"name": "slic_merge_n200_2cm",       "algo": "slic_merge",       "kwargs": {"n_segments": 200, "merge_threshold_m": 0.02}},
+    {"name": "slic_merge_n500_2cm",       "algo": "slic_merge",       "kwargs": {"n_segments": 500, "merge_threshold_m": 0.02}},
+    {"name": "slic_merge_n1000_3cm",      "algo": "slic_merge",       "kwargs": {"n_segments": 1000, "merge_threshold_m": 0.03}},
 ]
 
 
