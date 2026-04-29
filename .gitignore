@@ -30,6 +30,9 @@ sessions/
 # CLI debug outputs
 out_*/
 
+# Segmentation lab outputs
+debug_out/
+
 # Height-map artefacts inside sessions or anywhere else
 *.npy
 

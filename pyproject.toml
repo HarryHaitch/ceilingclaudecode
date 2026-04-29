@@ -25,6 +25,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "matplotlib>=3.7",
+    "scikit-image>=0.22",
 ]
 
 [project.scripts]
