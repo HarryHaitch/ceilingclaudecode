@@ -296,6 +296,59 @@ def felzenszwalb_merged(data: SegInput, *, scale: float = 200.0,
     return _compact_labels(seg)
 
 
+# ─── 5b. felzenszwalb on the ortho image (visual gradients) ─────────────────
+
+def felzenszwalb_image(data: SegInput, *, scale: float = 200.0,
+                       sigma: float = 0.8,
+                       merge_threshold_m: float = 0.03) -> np.ndarray:
+    """Felzenszwalb on the textured top-down render (RGB), then merge
+    adjacent regions whose mean heights agree within ±``merge_threshold_m``.
+
+    Edges follow paint, batten lines, materials and lighting — exactly
+    the signal a vision model would key off — and the height-based
+    merge collapses visually-distinct regions that sit on the same
+    ceiling plane.
+    """
+    from skimage.segmentation import felzenszwalb as fz
+    rgb = cv2.cvtColor(data.canvas, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+    seg = fz(rgb, scale=scale, sigma=sigma, channel_axis=-1,
+             min_size=int(0.3 * data.grid.pixels_per_metre ** 2)).astype(np.int32)
+    seg[~data.room_mask] = -1
+    seg = _merge_adjacent_by_height(seg, data.height_map, merge_threshold_m)
+    return _compact_labels(seg)
+
+
+def felzenszwalb_image_only(data: SegInput, *, scale: float = 200.0,
+                            sigma: float = 0.8) -> np.ndarray:
+    """Felzenszwalb on RGB with no height-based post-merge — pure
+    visual segmentation baseline."""
+    from skimage.segmentation import felzenszwalb as fz
+    rgb = cv2.cvtColor(data.canvas, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+    seg = fz(rgb, scale=scale, sigma=sigma, channel_axis=-1,
+             min_size=int(0.3 * data.grid.pixels_per_metre ** 2)).astype(np.int32)
+    seg[~data.room_mask] = -1
+    return _compact_labels(seg)
+
+
+def felzenszwalb_combined(data: SegInput, *, scale: float = 200.0,
+                          sigma: float = 0.8,
+                          height_weight: float = 1.0,
+                          intensity_weight: float = 0.3) -> np.ndarray:
+    """Felzenszwalb on a two-channel image stacking the normalised
+    height map and the grayscale ortho render. Single segmentation
+    that responds to both height steps and visual edges."""
+    from skimage.segmentation import felzenszwalb as fz
+    h = _heightmap_for_skimage(data.height_map).astype(np.float32)
+    h_range = max(float(h.max() - h.min()), 1e-6)
+    h_norm = (h - h.min()) / h_range
+    gray = cv2.cvtColor(data.canvas, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
+    img = np.stack([height_weight * h_norm, intensity_weight * gray], axis=-1)
+    seg = fz(img, scale=scale, sigma=sigma, channel_axis=-1,
+             min_size=int(0.3 * data.grid.pixels_per_metre ** 2)).astype(np.int32)
+    seg[~data.room_mask] = -1
+    return _compact_labels(seg)
+
+
 # ─── 6. multi-channel watershed ────────────────────────────────────────────
 
 def watershed_multi(data: SegInput, *,
@@ -541,6 +594,9 @@ ALGOS: dict[str, Callable[..., np.ndarray]] = {
     "region_growing": region_growing,
     "wall_constrained": wall_constrained,
     "felzenszwalb_merged": felzenszwalb_merged,
+    "felzenszwalb_image": felzenszwalb_image,
+    "felzenszwalb_image_only": felzenszwalb_image_only,
+    "felzenszwalb_combined": felzenszwalb_combined,
     "watershed_multi": watershed_multi,
     "region_growing_texture": region_growing_texture,
     "slic_merge": slic_merge,

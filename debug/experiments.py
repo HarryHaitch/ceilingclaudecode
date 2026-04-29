@@ -88,6 +88,15 @@ EXPERIMENTS: list[dict[str, Any]] = [
     {"name": "slic_merge_n200_2cm",       "algo": "slic_merge",       "kwargs": {"n_segments": 200, "merge_threshold_m": 0.02}},
     {"name": "slic_merge_n500_2cm",       "algo": "slic_merge",       "kwargs": {"n_segments": 500, "merge_threshold_m": 0.02}},
     {"name": "slic_merge_n1000_3cm",      "algo": "slic_merge",       "kwargs": {"n_segments": 1000, "merge_threshold_m": 0.03}},
+
+    # round 3 — felzenszwalb on the ortho render (visual gradients)
+    {"name": "felz_image_s200_3cm",       "algo": "felzenszwalb_image",      "kwargs": {"scale": 200, "merge_threshold_m": 0.03}},
+    {"name": "felz_image_s400_3cm",       "algo": "felzenszwalb_image",      "kwargs": {"scale": 400, "merge_threshold_m": 0.03}},
+    {"name": "felz_image_s800_3cm",       "algo": "felzenszwalb_image",      "kwargs": {"scale": 800, "merge_threshold_m": 0.03}},
+    {"name": "felz_image_only_s400",      "algo": "felzenszwalb_image_only", "kwargs": {"scale": 400}},
+    {"name": "felz_image_only_s800",      "algo": "felzenszwalb_image_only", "kwargs": {"scale": 800}},
+    {"name": "felz_combined_s200",        "algo": "felzenszwalb_combined",   "kwargs": {"scale": 200}},
+    {"name": "felz_combined_s200_h2",     "algo": "felzenszwalb_combined",   "kwargs": {"scale": 200, "intensity_weight": 0.6}},
 ]
 
 
