@@ -229,6 +229,17 @@ ul#polygons-list { list-style: none; padding: 0; margin: 0; }
 }
 .poly-row .del-btn:hover { color: var(--error); border-color: var(--error); }
 
+.poly-spark {
+  margin-top: 4px;
+  background: #14171a;
+  border: 1px solid #2c3036;
+  border-radius: 3px;
+  padding: 2px 4px;
+  display: flex;
+  justify-content: center;
+}
+.poly-spark .hist-spark { display: block; }
+
 #selection-info {
   font-size: 12px; line-height: 1.5;
   padding: 6px 8px;

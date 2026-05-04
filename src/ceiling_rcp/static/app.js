@@ -74,6 +74,18 @@ function formatHeightDelta(metres) {
   return `${sign}${Math.round(Math.abs(metres) * 1000)} mm`;
 }
 
+// Absolute world-Y height — used as the histogram axis label since
+// each bin lives in absolute metres, not relative to the datum.
+function formatHeightAbs(metres) {
+  if (unitsSystem() === "imperial") {
+    const inches = metres * 39.3700787;
+    const feet = Math.floor(inches / 12);
+    const remIn = Math.round(inches - feet * 12);
+    return `${feet}'-${remIn}"`;
+  }
+  return `${metres.toFixed(2)} m`;
+}
+
 // ─── TOPOLOGY HELPERS ─────────────────────────────────────────────────────
 // Post-snap, plan.topology is the source of truth: a planar graph where
 // shared edges between two faces are stored ONCE. Vertex drags here update
@@ -1007,7 +1019,7 @@ function refreshPolygonsList() {
   const ul = document.getElementById("polygons-list");
   ul.innerHTML = "";
 
-  const addRow = (key, label, color, meta, selKey, currentNotes, allowNotes, allowTintEdit) => {
+  const addRow = (key, label, color, meta, selKey, currentNotes, allowNotes, allowTintEdit, face) => {
     const li = document.createElement("li");
     li.className = "poly-row" + (state.selection?.key === selKey ? " active" : "");
     const head = document.createElement("div");
@@ -1039,6 +1051,14 @@ function refreshPolygonsList() {
         clearTimeout(tintTimer);
         pushTintForKey(selKey, sw.value);
       };
+    }
+
+    if (face && face.histogram && face.histogram.counts) {
+      const sparkWrap = document.createElement("div");
+      sparkWrap.className = "poly-spark";
+      sparkWrap.onclick = (e) => e.stopPropagation();
+      sparkWrap.appendChild(renderHistogramSparkline(face, selKey));
+      li.appendChild(sparkWrap);
     }
 
     if (allowNotes) {
@@ -1076,14 +1096,14 @@ function refreshPolygonsList() {
 
   if (state.plan.room) {
     addRow("room", "Room outline", "#ffe082",
-      `${state.plan.room.length} verts`, "room", null, false, false);
+      `${state.plan.room.length} verts`, "room", null, false, false, null);
   }
   if (state.plan.main) {
     const s = state.plan.main.stats;
     addRow("main", state.plan.main.label || "Main Ceiling (1)",
       state.plan.main.tint || "#80cbc4",
-      `${formatHeightDelta(0)}  variance ${formatLength(s.std_y)}`,
-      "main", state.plan.main.notes, true, true);
+      `${formatHeightDelta(0)}  spread ${formatLength(s.std_y)}`,
+      "main", state.plan.main.notes, true, true, state.plan.main);
   }
   for (const r of state.plan.regions || []) {
     const s = r.stats;
@@ -1091,15 +1111,203 @@ function refreshPolygonsList() {
     const relTxt = rel === null || rel === undefined ? "—" : formatHeightDelta(rel);
     addRow("region:" + r.id, r.label || `Ceiling Region (${r.id + 2})`,
       r.tint || "#ff7043",
-      `${relTxt}  variance ${formatLength(s.std_y)}`,
-      "region:" + r.id, r.notes, true, true);
+      `${relTxt}  spread ${formatLength(s.std_y)}`,
+      "region:" + r.id, r.notes, true, true, r);
   }
   for (const o of state.plan.obstructions || []) {
     addRow("column:" + o.id, o.label || `Column (${o.id + 1})`,
       "#ffffff", `${o.polygon.length} verts`,
-      "column:" + o.id, null, false, false);
+      "column:" + o.id, null, false, false, null);
   }
   updateSelectionInfo();
+}
+
+// ─── HISTOGRAM SPARKLINE ──────────────────────────────────────────────────
+// Each region row carries a per-pixel height histogram (bins in absolute
+// metres). The user drags a vertical marker to pick the height that
+// becomes that face's reported "ceiling height" — useful when the
+// polygon spans a non-flat ceiling (vault, services bump) and the mean
+// alone is ambiguous. Main's marker defines zero for the whole drawing.
+
+function renderHistogramSparkline(face, selKey) {
+  const hist = face.histogram;
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(SVG_NS, "svg");
+  const W = 264;
+  const H = 40;
+  svg.setAttribute("width", W);
+  svg.setAttribute("height", H);
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.classList.add("hist-spark");
+
+  if (!hist || !hist.counts || hist.counts.length === 0) {
+    const t = document.createElementNS(SVG_NS, "text");
+    t.setAttribute("x", W / 2);
+    t.setAttribute("y", H / 2);
+    t.setAttribute("text-anchor", "middle");
+    t.setAttribute("dominant-baseline", "middle");
+    t.setAttribute("font-size", "10");
+    t.setAttribute("fill", "#8b939c");
+    t.textContent = "no histogram — re-snap to compute";
+    svg.appendChild(t);
+    return svg;
+  }
+
+  const counts = hist.counts;
+  const minY = hist.min_y;
+  const maxY = hist.max_y;
+  const range = Math.max(1e-6, maxY - minY);
+  const sy = (face.selected_y ?? face.stats?.mean_y);
+  const meanY = face.stats?.mean_y;
+  const tint = face.tint || "#80cbc4";
+
+  const padX = 4;
+  const padTop = 3;
+  const padBot = 14;          // axis label row at the bottom
+  const usableW = W - 2 * padX;
+  const usableH = H - padTop - padBot;
+  const maxCount = Math.max(1, ...counts);
+
+  const xForY = (y) => padX + ((y - minY) / range) * usableW;
+
+  // Bars
+  const barW = usableW / counts.length;
+  for (let i = 0; i < counts.length; i++) {
+    const c = counts[i];
+    if (!c) continue;
+    const h = (c / maxCount) * usableH;
+    const x = padX + i * barW;
+    const y = padTop + (usableH - h);
+    const rect = document.createElementNS(SVG_NS, "rect");
+    rect.setAttribute("x", x);
+    rect.setAttribute("y", y);
+    rect.setAttribute("width", Math.max(1, barW));
+    rect.setAttribute("height", h);
+    rect.setAttribute("fill", tint);
+    rect.setAttribute("opacity", "0.8");
+    svg.appendChild(rect);
+  }
+
+  // Mean reference (faint dashed)
+  if (Number.isFinite(meanY)) {
+    const mx = xForY(meanY);
+    const meanLine = document.createElementNS(SVG_NS, "line");
+    meanLine.setAttribute("x1", mx);
+    meanLine.setAttribute("x2", mx);
+    meanLine.setAttribute("y1", padTop);
+    meanLine.setAttribute("y2", padTop + usableH);
+    meanLine.setAttribute("stroke", "#aaa");
+    meanLine.setAttribute("stroke-width", "0.8");
+    meanLine.setAttribute("stroke-dasharray", "2,2");
+    svg.appendChild(meanLine);
+  }
+
+  // Selected marker (red, draggable)
+  const handleSx = xForY(sy);
+  const line = document.createElementNS(SVG_NS, "line");
+  line.setAttribute("x1", handleSx);
+  line.setAttribute("x2", handleSx);
+  line.setAttribute("y1", padTop - 1);
+  line.setAttribute("y2", padTop + usableH + 1);
+  line.setAttribute("stroke", "#ef5350");
+  line.setAttribute("stroke-width", "1.6");
+  svg.appendChild(line);
+  const blob = document.createElementNS(SVG_NS, "circle");
+  blob.setAttribute("cx", handleSx);
+  blob.setAttribute("cy", padTop + 2);
+  blob.setAttribute("r", "3.5");
+  blob.setAttribute("fill", "#ef5350");
+  svg.appendChild(blob);
+
+  // Axis labels: min on the left, max on the right, selected centred
+  // beneath the marker. Use absolute heights so the user knows the
+  // physical surface they're picking, not just a delta.
+  function makeText(x, y, anchor, fill, weight, content) {
+    const t = document.createElementNS(SVG_NS, "text");
+    t.setAttribute("x", x);
+    t.setAttribute("y", y);
+    t.setAttribute("text-anchor", anchor);
+    t.setAttribute("font-size", "9");
+    t.setAttribute("fill", fill);
+    if (weight) t.setAttribute("font-weight", weight);
+    t.textContent = content;
+    return t;
+  }
+  svg.appendChild(makeText(padX, H - 2, "start", "#8b939c", null,
+    formatHeightAbs(minY)));
+  svg.appendChild(makeText(W - padX, H - 2, "end", "#8b939c", null,
+    formatHeightAbs(maxY)));
+  const selLabel = makeText(handleSx, H - 2, "middle", "#ef5350", "600",
+    formatHeightAbs(sy));
+  svg.appendChild(selLabel);
+
+  // Drag interaction — clamp to [minY, maxY] and snap to bin width so
+  // the on-screen marker only ever falls on a bin centre.
+  svg.style.cursor = "ew-resize";
+  svg.style.userSelect = "none";
+  let dragging = false;
+  let lastY = sy;
+  function applyFromEvent(e) {
+    const rect = svg.getBoundingClientRect();
+    const xPx = e.clientX - rect.left;
+    const xUnits = (xPx * W) / rect.width;  // SVG viewBox-aware
+    const norm = Math.max(0, Math.min(1, (xUnits - padX) / usableW));
+    const newY = minY + norm * range;
+    const px = xForY(newY);
+    line.setAttribute("x1", px);
+    line.setAttribute("x2", px);
+    blob.setAttribute("cx", px);
+    selLabel.setAttribute("x", px);
+    selLabel.textContent = formatHeightAbs(newY);
+    lastY = newY;
+  }
+  svg.addEventListener("mousedown", (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    dragging = true;
+    applyFromEvent(e);
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    applyFromEvent(e);
+  });
+  window.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false;
+    pushSelectedY(selKey, lastY);
+  });
+
+  return svg;
+}
+
+async function pushSelectedY(selKey, newY) {
+  if (!state.sessionId) return;
+  let url;
+  if (selKey === "main") {
+    url = `/api/sessions/${state.sessionId}/main/selected_y`;
+  } else if (selKey.startsWith("region:")) {
+    const id = parseInt(selKey.slice(7), 10);
+    url = `/api/sessions/${state.sessionId}/region/${id}/selected_y`;
+  } else {
+    return;
+  }
+  const r = await fetch(url, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value: newY }),
+  });
+  if (!r.ok) {
+    setBanner("Height update failed: " + (await r.text()).slice(0, 120), true);
+    return;
+  }
+  // Server's recompute touched relative_y on every face — re-read the
+  // whole plan so the UI's labels stay in sync (especially after a
+  // main.selected_y drag, which changes every region's delta).
+  const planResp = await fetch(`/api/sessions/${state.sessionId}/plan`);
+  if (!planResp.ok) return;
+  state.plan = await planResp.json();
+  refreshPolygonsList();
+  if (state.selection) updateSelectionInfo();
 }
 
 async function saveNotes(selKey, value) {
@@ -1147,7 +1355,7 @@ function renderStats(title, s, relativeY) {
   const valid_pct = (s.valid_frac * 100).toFixed(0);
   const fmt_range = formatLength(s.max_y - s.min_y);
   const warn = s.std_y > 0.05
-    ? `<div class="warn-line">⚠ high variance (${fmt_std}) — likely clipped a bulkhead</div>`
+    ? `<div class="warn-line">⚠ high spread (${fmt_std}) — likely clipped a bulkhead</div>`
     : "";
   const validWarn = s.valid_frac < 0.6
     ? `<div class="warn-line">⚠ only ${valid_pct}% of polygon has LiDAR coverage</div>`
@@ -1155,7 +1363,7 @@ function renderStats(title, s, relativeY) {
   return `
     <b>${title}</b><br>
     relative height: ${fmt_rel}<br>
-    variance inside polygon: ${fmt_std}<br>
+    spread inside polygon: ${fmt_std}<br>
     range inside polygon: ${fmt_range}<br>
     LiDAR coverage: ${valid_pct}%
     ${warn}${validWarn}

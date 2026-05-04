@@ -77,7 +77,7 @@ def _session_dir(session_id: str) -> Path:
 # Schema version for plan.json. Bump when the on-disk shape changes; add a
 # migration step in _migrate_plan. Files written by older versions are
 # upgraded transparently on first read.
-PLAN_SCHEMA_VERSION = 3
+PLAN_SCHEMA_VERSION = 4
 
 
 def _migrate_plan(plan: dict[str, Any]) -> dict[str, Any]:
@@ -94,6 +94,14 @@ def _migrate_plan(plan: dict[str, Any]) -> dict[str, Any]:
         # plan["project"]. All optional with sensible defaults.
         plan.setdefault("units", "metric")
         plan.setdefault("scan_settings", {"max_ceiling_variance_m": 1.5})
+    if v < 4:
+        # v3 → v4: introduces face-level ``selected_y`` and ``histogram``.
+        # Both back-fill lazily from existing stats — selected_y defaults
+        # to stats.mean_y and the histogram is regenerated next time
+        # _analyse_and_pack runs for that face. The frontend tolerates
+        # missing histograms (renders a "no data" sparkline) so an
+        # unedited migrated plan is still usable.
+        pass
     plan["schema_version"] = PLAN_SCHEMA_VERSION
     # Field-level defaults that don't warrant a schema bump.
     plan.setdefault("obstructions", [])
@@ -106,7 +114,63 @@ def _migrate_plan(plan: dict[str, Any]) -> dict[str, Any]:
     for k, v_default in defaults.items():
         proj.setdefault(k, v_default)
     plan["project"] = proj
+    # selected_y back-fills from stats.mean_y; relative_y derives from
+    # selected_y everywhere. Safe to call on every load — it only
+    # writes selected_y if missing, and re-derives relative_y always.
+    _recompute_relatives(plan)
     return plan
+
+
+def _backfill_selected_y(face: dict | None) -> None:
+    """If ``face.selected_y`` is missing, copy it from ``face.stats.mean_y``.
+    NaN means we have no LiDAR for that face — leave selected_y absent
+    so callers know the height is unknown."""
+    if not face:
+        return
+    if face.get("selected_y") is not None:
+        return
+    mean_y = (face.get("stats") or {}).get("mean_y")
+    if mean_y is None:
+        return
+    try:
+        my = float(mean_y)
+    except (TypeError, ValueError):
+        return
+    import math as _math
+    if _math.isnan(my):
+        return
+    face["selected_y"] = my
+
+
+def _recompute_relatives(plan: dict) -> None:
+    """Walk main + regions + topology faces, back-fill ``selected_y`` from
+    ``stats.mean_y`` where missing, and re-derive ``relative_y`` as
+    ``face.selected_y - main.selected_y``.
+
+    The main ceiling's ``relative_y`` is always 0 (it *is* the datum).
+    Faces with no selected_y (no LiDAR coverage) carry ``relative_y =
+    None`` so the UI can show "—" rather than a misleading "0 mm"."""
+    main = plan.get("main")
+    _backfill_selected_y(main)
+    if main:
+        main["relative_y"] = 0.0
+
+    main_sy = (main or {}).get("selected_y")
+
+    def _rel_for(face: dict) -> float | None:
+        sy = face.get("selected_y")
+        if sy is None or main_sy is None:
+            return None
+        return float(sy) - float(main_sy)
+
+    for r in (plan.get("regions") or []):
+        _backfill_selected_y(r)
+        r["relative_y"] = _rel_for(r)
+    topo = plan.get("topology")
+    if topo:
+        for f in (topo.get("faces") or []):
+            _backfill_selected_y(f)
+            f["relative_y"] = _rel_for(f)
 
 
 def _load_plan(session_id: str) -> dict[str, Any]:
@@ -418,12 +482,60 @@ def _analyse_and_pack(
             range_m=range_m, tint=tint,
         )
 
+    histogram = _height_histogram(height_map, stats_mask)
+
     return {
         "stats": stats.as_dict(),
         "heatmap_bbox_px": list(bbox),
         "heatmap_png_b64": base64.b64encode(png_bytes).decode("ascii") if png_bytes else "",
         "heatmap_range_m": range_m,
         "tint": tint,
+        "histogram": histogram,
+    }
+
+
+# Histogram bin width — ~5 mm matches the cluster-C UX (markers
+# move in millimetre-feel increments). The cone-band-filtered height
+# map is already free of floor / furniture noise, so the histogram
+# represents the ceiling-area-vs-height distribution directly.
+HEIGHT_HISTOGRAM_BIN_M = 0.005
+
+
+def _height_histogram(
+    height_map: np.ndarray, mask: np.ndarray,
+    *, bin_w_m: float = HEIGHT_HISTOGRAM_BIN_M,
+) -> dict | None:
+    """Return ``{bin_edges_m, counts, min_y, max_y, bin_w_m}`` for the
+    valid (non-NaN) ceiling heights inside ``mask``. ``None`` if the
+    mask is empty or every pixel is NaN.
+
+    Bins are 5 mm by default and span exactly the polygon's local range
+    so each region's sparkline fills its width regardless of overall
+    room spread."""
+    if not mask.any():
+        return None
+    sample = height_map[mask]
+    valid = sample[~np.isnan(sample)]
+    if valid.size == 0:
+        return None
+    lo = float(valid.min())
+    hi = float(valid.max())
+    if hi - lo < bin_w_m:
+        # Perfectly flat polygon — single bin, centre on the value.
+        edges = [lo - bin_w_m / 2, lo + bin_w_m / 2]
+        counts = [int(valid.size)]
+    else:
+        n_bins = max(2, int(np.ceil((hi - lo) / bin_w_m)))
+        edges_arr = np.linspace(lo, hi, n_bins + 1)
+        counts_arr, _ = np.histogram(valid, bins=edges_arr)
+        edges = [float(e) for e in edges_arr]
+        counts = [int(c) for c in counts_arr]
+    return {
+        "bin_edges_m": edges,
+        "counts": counts,
+        "min_y": lo,
+        "max_y": hi,
+        "bin_w_m": bin_w_m,
     }
 
 
@@ -643,6 +755,7 @@ async def api_set_scan_settings(session_id: str, payload: dict = Body(...)) -> d
         plan["topology"] = None
     plan["snapped"] = False
 
+    _recompute_relatives(plan)
     _save_plan(session_id, plan)
     return plan
 
@@ -801,11 +914,7 @@ async def api_set_main(session_id: str, payload: dict = Body(...)) -> dict:
             "label": "Main Ceiling (1)",
             **analysis,
         }
-    # Recompute relative_y on regions
-    datum = (plan.get("main") or {}).get("stats", {}).get("mean_y")
-    for r in plan.get("regions", []):
-        m = r.get("stats", {}).get("mean_y")
-        r["relative_y"] = (m - datum) if (m is not None and datum is not None) else None
+    _recompute_relatives(plan)
     _save_plan(session_id, plan)
     return {"ok": True, "main": plan["main"]}
 
@@ -839,6 +948,7 @@ async def api_add_region(session_id: str, payload: dict = Body(...)) -> dict:
     }
     plan.setdefault("regions", []).append(region)
     had_topology = plan.get("topology") is not None
+    _recompute_relatives(plan)
     _save_plan(session_id, plan)
     if had_topology:
         # Topology was already built — rebuild it so the new region
@@ -892,6 +1002,7 @@ async def api_update_region(
                 )
                 r.update(analysis)
                 _mirror_tint_to_topology(plan, region_id=region_id, tint=tint)
+            _recompute_relatives(plan)
             _save_plan(session_id, plan)
             return {"ok": True, "region": r}
     raise HTTPException(404, f"unknown region {region_id}")
@@ -924,8 +1035,77 @@ async def api_main_tint(session_id: str, payload: dict = Body(...)) -> dict:
     )
     plan["main"].update(analysis)
     _mirror_tint_to_topology(plan, region_id=None, tint=tint)
+    _recompute_relatives(plan)
     _save_plan(session_id, plan)
     return {"ok": True, "main": plan["main"]}
+
+
+@app.put("/api/sessions/{session_id}/main/selected_y")
+async def api_main_selected_y(session_id: str, payload: dict = Body(...)) -> dict:
+    """Set the main ceiling's reported height. The histogram lets the
+    user pick a peak (e.g. the upper of two surfaces in a stepped
+    main) instead of the mean. Every region's ``relative_y`` is
+    re-derived against the new datum."""
+    plan = _load_plan(session_id)
+    if not plan.get("main"):
+        raise HTTPException(409, "main not set")
+    raw = payload.get("value")
+    if raw is None:
+        raise HTTPException(400, "value (selected_y, metres) required")
+    try:
+        sy = float(raw)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "value must be numeric")
+    plan["main"]["selected_y"] = sy
+    _mirror_selected_y_to_topology(plan, region_id=None, selected_y=sy)
+    _recompute_relatives(plan)
+    _save_plan(session_id, plan)
+    return {"ok": True, "main": plan["main"], "regions": plan.get("regions", [])}
+
+
+@app.put("/api/sessions/{session_id}/region/{region_id}/selected_y")
+async def api_region_selected_y(
+    session_id: str, region_id: int, payload: dict = Body(...),
+) -> dict:
+    """Set a region's reported height. The PDF / sidebar use
+    ``selected_y - main.selected_y`` for the height delta — this is
+    the user's escape hatch when the polygon's mean Y doesn't match
+    what they want to call out."""
+    plan = _load_plan(session_id)
+    raw = payload.get("value")
+    if raw is None:
+        raise HTTPException(400, "value (selected_y, metres) required")
+    try:
+        sy = float(raw)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "value must be numeric")
+    target = next(
+        (r for r in plan.get("regions", []) if r["id"] == region_id), None,
+    )
+    if target is None:
+        raise HTTPException(404, f"unknown region {region_id}")
+    target["selected_y"] = sy
+    _mirror_selected_y_to_topology(plan, region_id=region_id, selected_y=sy)
+    _recompute_relatives(plan)
+    _save_plan(session_id, plan)
+    return {"ok": True, "region": target}
+
+
+def _mirror_selected_y_to_topology(
+    plan: dict, *, region_id: int | None, selected_y: float,
+) -> None:
+    """Keep ``plan['topology'].faces[*].selected_y`` in sync with the
+    legacy ``main`` / ``regions`` views. ``region_id=None`` means main."""
+    topo = plan.get("topology")
+    if not topo:
+        return
+    for f in topo.get("faces") or []:
+        if region_id is None and f.get("id") == 0:
+            f["selected_y"] = selected_y
+            return
+        if region_id is not None and f.get("region_id") == region_id:
+            f["selected_y"] = selected_y
+            return
 
 
 _HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -1257,6 +1437,7 @@ async def api_auto_detect(session_id: str, payload: dict = Body(default={})) -> 
         })
     plan["regions"] = new_regions
     plan["auto_detected"] = True
+    _recompute_relatives(plan)
     _save_plan(session_id, plan)
     return plan
 
@@ -1472,6 +1653,7 @@ async def api_snap(session_id: str) -> dict:
     plan["topology"] = topo
     plan["regions"] = new_regions
     plan["snapped"] = True
+    _recompute_relatives(plan)
     _save_plan(session_id, plan)
     return plan
 
@@ -1575,6 +1757,7 @@ def _refresh_topology_polygons(plan: dict, session_id: str) -> None:
             **analysis,
         })
     plan["regions"] = new_regions
+    _recompute_relatives(plan)
 
 
 @app.put("/api/sessions/{session_id}/topology/vertices")
