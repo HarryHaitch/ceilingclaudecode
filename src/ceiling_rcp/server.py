@@ -164,6 +164,55 @@ def _extract_upload(
 DEFAULT_MAX_CEILING_VARIANCE_M = 1.5
 
 
+# ─── SCALE LADDERS ────────────────────────────────────────────────────────────
+# Standard architectural scales — ordered largest → smallest. The PDF picks
+# the largest (most detail) that still fits the room within the plan area.
+SCALE_LADDER_METRIC = (20, 50, 100, 200)
+SCALE_LADDER_IMPERIAL = (24, 48, 96, 192)   # 1/2", 1/4", 1/8", 1/16" = 1'
+
+# Tick-mark distances for the graphic scale bar (one entry per ratio).
+# Marks express world distance (metres / feet); the bar's paper length is
+# computed at PDF time as marks[-1] / scale.
+SCALE_BAR_MARKS_METRIC = {
+    20:  [0, 1, 2],
+    50:  [0, 1, 2, 5],
+    100: [0, 1, 5, 10],
+    200: [0, 5, 10, 20],
+}
+SCALE_BAR_MARKS_IMPERIAL = {
+    24:  [0, 1, 2, 5],
+    48:  [0, 1, 5, 10],
+    96:  [0, 5, 10, 20],
+    192: [0, 10, 20, 40],
+}
+
+# Paper margin around the room outline at the chosen scale. 10 mm is
+# tight enough to let close-fit rooms keep their preferred scale (e.g.
+# 21 m in the plan area at 1:50) while still leaving room for the
+# heavier room outline stroke and edge dimension labels.
+PLAN_PAPER_PAD_M = 0.010
+
+
+def _choose_standard_scale(
+    room_w_m: float, room_h_m: float,
+    plan_w_in: float, plan_h_in: float,
+    units: str,
+) -> int:
+    """Return the largest standard scale ratio that fits ``room_w_m × room_h_m``
+    inside the plan area (``plan_w_in × plan_h_in``) with ``PLAN_PAPER_PAD_M``
+    of paper margin per side. Falls back to the coarsest ratio if nothing
+    fits — the room would overspill but the user gets *some* output."""
+    pad_in = PLAN_PAPER_PAD_M / 0.0254
+    avail_w_m = max(0.0, plan_w_in - 2 * pad_in) * 0.0254
+    avail_h_m = max(0.0, plan_h_in - 2 * pad_in) * 0.0254
+    ladder = (SCALE_LADDER_IMPERIAL
+              if units == "imperial" else SCALE_LADDER_METRIC)
+    for s in ladder:
+        if room_w_m <= avail_w_m * s and room_h_m <= avail_h_m * s:
+            return s
+    return ladder[-1]
+
+
 def _default_project() -> dict[str, Any]:
     """Empty project metadata. The user fills these in via the project
     panel; the PDF reads them straight off."""
@@ -1724,11 +1773,10 @@ async def api_pdf(session_id: str) -> Response:
 
     xs = [p[0] for p in room]
     zs = [p[1] for p in room]
-    pad = 0.5
-    minx, maxx = min(xs) - pad, max(xs) + pad
-    minz, maxz = min(zs) - pad, max(zs) + pad
-    width_m = maxx - minx
-    height_m = maxz - minz
+    room_minx, room_maxx = min(xs), max(xs)
+    room_minz, room_maxz = min(zs), max(zs)
+    room_w_m = room_maxx - room_minx
+    room_h_m = room_maxz - room_minz
 
     # ─── A1 landscape page (841 × 594 mm = 33.11 × 23.39 in) ──
     # gridspec: plan area (top-left) + title block (full-height right strip)
@@ -1745,6 +1793,27 @@ async def api_pdf(session_id: str) -> Response:
     ax = fig.add_subplot(gs[0, 0])
     title_ax = fig.add_subplot(gs[:, 1])
     legend_ax = fig.add_subplot(gs[1, 0])
+
+    # Plan-area paper dimensions, derived from the gridspec slot rather
+    # than the ax (the latter only resolves once the figure renders).
+    plan_bbox = gs[0, 0].get_position(fig)
+    plan_w_in = plan_bbox.width * A1_W_IN
+    plan_h_in = plan_bbox.height * A1_H_IN
+
+    # Pick the largest standard scale that fits the room inside the plan
+    # area with PLAN_PAPER_PAD_M of paper margin per side.
+    scale_ratio = _choose_standard_scale(
+        room_w_m, room_h_m, plan_w_in, plan_h_in, units,
+    )
+
+    # Compute the world window that the plan area represents at this
+    # scale: paper width × paper-mm-per-world-mm. Centre on the room.
+    window_w_m = plan_w_in * 0.0254 * scale_ratio
+    window_h_m = plan_h_in * 0.0254 * scale_ratio
+    cx = 0.5 * (room_minx + room_maxx)
+    cz = 0.5 * (room_minz + room_maxz)
+    minx, maxx = cx - window_w_m / 2, cx + window_w_m / 2
+    minz, maxz = cz - window_h_m / 2, cz + window_h_m / 2
 
     ax.set_aspect("equal")
     # RCP convention: mirror X so the plan reads with floor-plan handedness.
@@ -1920,18 +1989,21 @@ async def api_pdf(session_id: str) -> Response:
                 bbox=dict(boxstyle="round,pad=0.15",
                           facecolor="white", edgecolor="#aaa", linewidth=0.4))
 
-    # ─── North arrow + scale bar (overlays on the plan axes) ──
+    # ─── North arrow (overlay on the plan axes) ──
+    # The scale bar lives in the title block now (true-scale rendering
+    # makes the plan-area inset redundant — its job was a sanity check
+    # at an arbitrary scale).
     if project.get("print_north", True):
         _draw_north_arrow(
             ax, minx, maxx, minz, maxz,
             north_deg=float(project.get("north_deg", 0.0)),
         )
-    _draw_scale_bar(ax, minx, maxx, minz, maxz, units=units)
 
     # ─── Title block (right strip) ──
     _draw_title_block(
         title_ax, project=project, session_id=session_id,
         ortho_path=_session_dir(session_id) / "out" / "ceiling.jpg",
+        scale_ratio=scale_ratio, units=units,
     )
 
     # ─── Legends (bottom strip) ──
@@ -1978,55 +2050,77 @@ def _draw_north_arrow(ax, minx, maxx, minz, maxz, *, north_deg: float) -> None:
             color="#222")
 
 
-def _draw_scale_bar(ax, minx, maxx, minz, maxz, *, units: str) -> None:
-    """Bottom-left of the plan axes: 0 — 1 — 5 — 10 m bar (or 0-1-5-10 ft)."""
+def _draw_title_scale(title_ax, *, scale_ratio: int, units: str,
+                       y_top: float, y_bot: float, strip_w_in: float) -> None:
+    """Draw the SCALE section inside the title strip: a label, the
+    "1:N" ratio, and a graphic scale bar whose paper length matches the
+    chosen scale exactly.
+
+    ``y_top`` / ``y_bot`` bound the section in title-axis y-units.
+    ``strip_w_in`` is the title strip's paper width in inches — needed
+    to translate paper distance into title-axis x-fractions.
+    """
     from matplotlib.patches import Rectangle
-    bar_h_world = (maxz - minz) * 0.012
-    if bar_h_world < 0.06:
-        bar_h_world = 0.06
+    section_h = y_top - y_bot
+    # Heading row: "SCALE" label on the left, "1:N" value on the right.
+    label_y = y_top - 0.005
+    title_ax.text(0.06, label_y, "SCALE",
+                   ha="left", va="top",
+                   fontsize=7, fontweight="bold", color="#888")
+    title_ax.text(0.94, label_y, f"1:{scale_ratio}",
+                   ha="right", va="top",
+                   fontsize=14, color="#222")
+
+    # Graphic bar: marks chosen per ratio so the paper length is
+    # roughly half-strip-wide and the unit increments read cleanly.
     if units == "imperial":
-        marks_units = [0, 1, 5, 10]   # feet
+        marks = SCALE_BAR_MARKS_IMPERIAL.get(
+            scale_ratio, SCALE_BAR_MARKS_IMPERIAL[48])
         unit_to_m = 0.3048
         unit_label = "ft"
     else:
-        marks_units = [0, 1, 5, 10]   # metres
+        marks = SCALE_BAR_MARKS_METRIC.get(
+            scale_ratio, SCALE_BAR_MARKS_METRIC[100])
         unit_to_m = 1.0
         unit_label = "m"
-    total_world = marks_units[-1] * unit_to_m
-
-    # Inset at the bottom-left of the plan axes — 25% of plan width, so
-    # readable across most rooms.
-    plan_w = maxx - minx
-    plan_h = maxz - minz
-    ix = ax.inset_axes([0.02, 0.02, min(0.30, total_world / plan_w * 1.1), 0.06])
-    ix.set_xlim(0, total_world)
-    ix.set_ylim(-bar_h_world * 2, bar_h_world * 2)
-    ix.set_aspect("auto")
-    ix.axis("off")
+    total_world_m = marks[-1] * unit_to_m
+    bar_paper_in = total_world_m / scale_ratio / 0.0254
+    bar_w_frac = bar_paper_in / strip_w_in
+    # Hard cap so very low ratios (1:20) don't overflow the strip.
+    bar_w_frac = min(bar_w_frac, 0.88)
+    bar_x0 = (1.0 - bar_w_frac) / 2
+    bar_x1 = bar_x0 + bar_w_frac
+    # Bar height: small fraction of the section, with a tick zone below.
+    bar_h = section_h * 0.22
+    bar_y0 = y_bot + section_h * 0.45
+    bar_y1 = bar_y0 + bar_h
 
     # Alternating black/white segments between successive marks.
-    for i in range(len(marks_units) - 1):
-        x0 = marks_units[i] * unit_to_m
-        x1 = marks_units[i + 1] * unit_to_m
+    for i in range(len(marks) - 1):
+        seg_x0 = bar_x0 + bar_w_frac * marks[i] / marks[-1]
+        seg_x1 = bar_x0 + bar_w_frac * marks[i + 1] / marks[-1]
         face = "#222" if i % 2 == 0 else "white"
-        ix.add_patch(Rectangle(
-            (x0, 0), x1 - x0, bar_h_world,
-            facecolor=face, edgecolor="#222", linewidth=0.8,
+        title_ax.add_patch(Rectangle(
+            (seg_x0, bar_y0), seg_x1 - seg_x0, bar_h,
+            facecolor=face, edgecolor="#222", linewidth=0.6,
         ))
-
-    for m_v in marks_units:
-        x = m_v * unit_to_m
-        ix.plot([x, x], [0, -bar_h_world * 0.7], color="#222", linewidth=0.8)
-        ix.text(x, -bar_h_world * 1.4, f"{m_v}",
-                ha="center", va="top", fontsize=8, color="#222")
-    ix.text(total_world, bar_h_world * 1.3, unit_label,
-            ha="right", va="bottom", fontsize=8, color="#222")
+    # Tick labels under each mark.
+    for m_v in marks:
+        x = bar_x0 + bar_w_frac * m_v / marks[-1]
+        title_ax.plot([x, x], [bar_y0, bar_y0 - bar_h * 0.5],
+                       color="#222", linewidth=0.6)
+        title_ax.text(x, bar_y0 - bar_h * 0.7, f"{m_v}",
+                       ha="center", va="top", fontsize=7, color="#222")
+    # Unit suffix at the right end.
+    title_ax.text(bar_x1 + 0.005, bar_y1 - bar_h * 0.5, unit_label,
+                   ha="left", va="center", fontsize=7, color="#222")
 
 
 def _draw_title_block(title_ax, *, project: dict, session_id: str,
-                       ortho_path: Path) -> None:
-    """Right-side title block: ortho thumbnail, project metadata, and
-    drawing register table."""
+                       ortho_path: Path, scale_ratio: int,
+                       units: str) -> None:
+    """Right-side title block: ortho thumbnail, project metadata, scale
+    badge + bar, and drawing register table."""
     from matplotlib.patches import Rectangle
     title_ax.set_xlim(0, 1)
     title_ax.set_ylim(0, 1)
@@ -2034,6 +2128,14 @@ def _draw_title_block(title_ax, *, project: dict, session_id: str,
     # Outer frame.
     title_ax.add_patch(Rectangle((0, 0), 1, 1, fill=False,
                                   edgecolor="#222", linewidth=1.2))
+
+    # Strip paper dimensions — needed by both the thumbnail aspect-fit
+    # and the scale-bar paper-length calculation. Computed once.
+    fig = title_ax.figure
+    fig_w_in, fig_h_in = fig.get_size_inches()
+    ax_bbox = title_ax.get_position()
+    strip_w_in = ax_bbox.width * fig_w_in
+    strip_h_in = ax_bbox.height * fig_h_in
 
     # Top: ortho thumbnail. The box is fixed; the image is letter-boxed
     # inside it so its natural aspect is preserved (no stretching).
@@ -2051,14 +2153,6 @@ def _draw_title_block(title_ax, *, project: dict, session_id: str,
             import matplotlib.image as mpimg
             img = mpimg.imread(str(ortho_path))
             ih, iw = img.shape[:2]
-            # Convert the box from axis-units to inches via the title_ax's
-            # figure-relative position so the aspect calc is robust to
-            # any gridspec width/height changes upstream.
-            fig = title_ax.figure
-            fig_w_in, fig_h_in = fig.get_size_inches()
-            ax_bbox = title_ax.get_position()
-            strip_w_in = ax_bbox.width * fig_w_in
-            strip_h_in = ax_bbox.height * fig_h_in
             box_w_in = strip_w_in * (THUMB_RIGHT - THUMB_LEFT)
             box_h_in = strip_h_in * (THUMB_TOP - THUMB_BOTTOM)
             img_aspect = iw / ih           # >1 = wide, <1 = tall
@@ -2110,8 +2204,21 @@ def _draw_title_block(title_ax, *, project: dict, session_id: str,
                        ha="left", va="bottom",
                        fontsize=14, color="#222")
 
+    # Scale section (badge + graphic bar) — sits between the project
+    # fields and the drawing register.
+    scale_top = field_top - len(fields) * field_h - 0.02
+    scale_bot = scale_top - 0.06
+    title_ax.add_patch(Rectangle(
+        (0.04, scale_bot), 0.92, scale_top - scale_bot,
+        fill=False, edgecolor="#bbb", linewidth=0.5,
+    ))
+    _draw_title_scale(
+        title_ax, scale_ratio=scale_ratio, units=units,
+        y_top=scale_top, y_bot=scale_bot, strip_w_in=strip_w_in,
+    )
+
     # Drawing register table.
-    reg_top = field_top - len(fields) * field_h - 0.02
+    reg_top = scale_bot - 0.02
     reg_bot = 0.05
     title_ax.text(0.04, reg_top + 0.005, "DRAWING REGISTER",
                   ha="left", va="bottom",
