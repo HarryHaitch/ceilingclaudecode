@@ -66,15 +66,37 @@ def _session_dir(session_id: str) -> Path:
     return p
 
 
+# Schema version for plan.json. Bump when the on-disk shape changes; add a
+# migration step in _migrate_plan. Files written by older versions are
+# upgraded transparently on first read.
+PLAN_SCHEMA_VERSION = 2
+
+
+def _migrate_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    """Upgrade an on-disk plan to PLAN_SCHEMA_VERSION in place."""
+    v = int(plan.get("schema_version", 1))
+    if v < 2:
+        # v1 → v2: introduces plan["topology"] (built fresh by api_snap). v1
+        # files that were already snapped lose their per-polygon shared-edge
+        # property until the user re-snaps; the polygons themselves are
+        # preserved so editing still works.
+        plan.setdefault("topology", None)
+        plan["schema_version"] = 2
+    # Field-level defaults that don't warrant a schema bump.
+    plan.setdefault("obstructions", [])
+    return plan
+
+
 def _load_plan(session_id: str) -> dict[str, Any]:
     sd = _session_dir(session_id)
     plan_path = sd / "out" / "plan.json"
     if not plan_path.exists():
         raise HTTPException(409, "session not processed yet")
-    return json.loads(plan_path.read_text())
+    return _migrate_plan(json.loads(plan_path.read_text()))
 
 
 def _save_plan(session_id: str, plan: dict[str, Any]) -> None:
+    plan["schema_version"] = PLAN_SCHEMA_VERSION
     sd = _session_dir(session_id)
     (sd / "out" / "plan.json").write_text(json.dumps(plan, indent=2))
 
@@ -130,6 +152,7 @@ def process_session(session_id: str, *, ppm: int = 150) -> dict[str, Any]:
     rep = inspect_folder(upload)
     plan: dict[str, Any] = {
         "session_id": session_id,
+        "schema_version": PLAN_SCHEMA_VERSION,
         "report": {
             "ok": rep.ok,
             "obj": str(rep.obj) if rep.obj else None,
@@ -143,6 +166,8 @@ def process_session(session_id: str, *, ppm: int = 150) -> dict[str, Any]:
         "room": None,
         "main": None,
         "regions": [],
+        "obstructions": [],
+        "topology": None,
     }
 
     if not rep.ok:
@@ -381,15 +406,107 @@ async def api_set_room(session_id: str, payload: dict = Body(...)) -> dict:
     return {"ok": True, "room": plan["room"], "room_heatmap": plan.get("room_heatmap")}
 
 
+# ─── OBSTRUCTIONS (columns / structural negative space) ──────────────────────
+#
+# Obstructions are user-drawn polygons inside the room outline that the
+# ceiling can't span — typically structural columns. They live alongside
+# `regions` but never become ceiling faces; the snap pipeline subtracts
+# their area from the room mask so adjacent regions stop cleanly at their
+# boundary, and the canvas + PDF render them as a hatched overlay.
+#
+# Schema: ``plan["obstructions"] = [{id, polygon, label, kind: "column"}]``.
+
+OBSTRUCTION_KINDS = {"column"}
+
+
+@app.post("/api/sessions/{session_id}/obstruction")
+async def api_add_obstruction(session_id: str, payload: dict = Body(...)) -> dict:
+    plan = _load_plan(session_id)
+    poly = payload.get("polygon", [])
+    if len(poly) < 3:
+        raise HTTPException(400, "obstruction polygon must have at least 3 vertices")
+    kind = str(payload.get("kind", "column"))
+    if kind not in OBSTRUCTION_KINDS:
+        raise HTTPException(400, f"unknown obstruction kind {kind!r}")
+    obs_id = (max((o["id"] for o in plan.get("obstructions", [])), default=-1)) + 1
+    label = str(payload.get("label") or f"Column ({obs_id + 1})")
+    obstruction = {
+        "id": obs_id,
+        "kind": kind,
+        "label": label,
+        "polygon": [list(p) for p in poly],
+    }
+    plan.setdefault("obstructions", []).append(obstruction)
+    had_topology = plan.get("topology") is not None
+    _save_plan(session_id, plan)
+    if had_topology:
+        # Topology was built without this obstruction in the room mask; rebuild
+        # so the new column is honoured.
+        await api_snap(session_id)
+        return {"ok": True, "obstruction": obstruction, "snapped": True,
+                "plan": _load_plan(session_id)}
+    return {"ok": True, "obstruction": obstruction}
+
+
+@app.put("/api/sessions/{session_id}/obstruction/{obstruction_id}")
+async def api_update_obstruction(
+    session_id: str, obstruction_id: int, payload: dict = Body(...),
+) -> dict:
+    plan = _load_plan(session_id)
+    obs = next(
+        (o for o in plan.get("obstructions", []) if o["id"] == obstruction_id),
+        None,
+    )
+    if obs is None:
+        raise HTTPException(404, f"unknown obstruction {obstruction_id}")
+    if "polygon" in payload:
+        if len(payload["polygon"]) < 3:
+            raise HTTPException(400, "polygon must have at least 3 vertices")
+        obs["polygon"] = [list(p) for p in payload["polygon"]]
+    if "label" in payload:
+        obs["label"] = str(payload["label"])[:120]
+    had_topology = plan.get("topology") is not None
+    _save_plan(session_id, plan)
+    if had_topology and "polygon" in payload:
+        await api_snap(session_id)
+        return {"ok": True, "obstruction": obs, "snapped": True,
+                "plan": _load_plan(session_id)}
+    return {"ok": True, "obstruction": obs}
+
+
+@app.delete("/api/sessions/{session_id}/obstruction/{obstruction_id}")
+async def api_delete_obstruction(session_id: str, obstruction_id: int) -> dict:
+    plan = _load_plan(session_id)
+    before = len(plan.get("obstructions", []))
+    plan["obstructions"] = [
+        o for o in plan.get("obstructions", []) if o["id"] != obstruction_id
+    ]
+    if len(plan["obstructions"]) == before:
+        raise HTTPException(404, f"unknown obstruction {obstruction_id}")
+    had_topology = plan.get("topology") is not None
+    _save_plan(session_id, plan)
+    if had_topology:
+        await api_snap(session_id)
+        return {"ok": True, "snapped": True, "plan": _load_plan(session_id)}
+    return {"ok": True}
+
+
 # ─── MAIN CEILING POLYGON ─────────────────────────────────────────────────────
 
 @app.put("/api/sessions/{session_id}/main")
 async def api_set_main(session_id: str, payload: dict = Body(...)) -> dict:
     """Set the main ceiling polygon. The mean Y of valid pixels inside it
     becomes the room's height datum (relative_y = 0). All other regions'
-    relative heights are recomputed against the new datum."""
+    relative heights are recomputed against the new datum.
+
+    If the session is snapped, any update auto-clears the topology — the
+    user is editing the underlying main polygon, so the derived topology
+    is invalidated until they re-snap."""
     plan = _load_plan(session_id)
     poly = payload.get("polygon")
+    if plan.get("topology") is not None:
+        plan["topology"] = None
+        plan["snapped"] = False
     if poly is None:
         plan["main"] = None
     else:
@@ -442,7 +559,14 @@ async def api_add_region(session_id: str, payload: dict = Body(...)) -> dict:
         **analysis,
     }
     plan.setdefault("regions", []).append(region)
+    had_topology = plan.get("topology") is not None
     _save_plan(session_id, plan)
+    if had_topology:
+        # Topology was already built — rebuild it so the new region
+        # participates with shared edges instead of dangling outside.
+        await api_snap(session_id)
+        plan = _load_plan(session_id)
+        return {"ok": True, "region": region, "snapped": True, "plan": plan}
     return {"ok": True, "region": region}
 
 
@@ -451,6 +575,16 @@ async def api_update_region(
     session_id: str, region_id: int, payload: dict = Body(...),
 ) -> dict:
     plan = _load_plan(session_id)
+    topo = plan.get("topology")
+    if "polygon" in payload and topo is not None:
+        # After snap, polygons are derived from the topology — direct
+        # polygon edits would silently desync. Force callers through the
+        # topology endpoints so shared edges stay shared.
+        raise HTTPException(
+            409,
+            "this session is snapped — edit vertices via "
+            "PUT /topology/vertices instead of PUT /region/{id}",
+        )
     for r in plan.get("regions", []):
         if r["id"] == region_id:
             if "polygon" in payload:
@@ -468,6 +602,7 @@ async def api_update_region(
                 r["label"] = str(payload["label"])
             if "notes" in payload:
                 r["notes"] = str(payload["notes"])[:500]
+                _mirror_notes_to_topology(plan, region_id=region_id, notes=r["notes"])
             _save_plan(session_id, plan)
             return {"ok": True, "region": r}
     raise HTTPException(404, f"unknown region {region_id}")
@@ -478,16 +613,49 @@ async def api_main_notes(session_id: str, payload: dict = Body(...)) -> dict:
     plan = _load_plan(session_id)
     if not plan.get("main"):
         raise HTTPException(409, "main not set")
-    plan["main"]["notes"] = str(payload.get("notes", ""))[:500]
+    notes = str(payload.get("notes", ""))[:500]
+    plan["main"]["notes"] = notes
+    _mirror_notes_to_topology(plan, region_id=None, notes=notes)
     _save_plan(session_id, plan)
     return {"ok": True}
+
+
+def _mirror_notes_to_topology(plan: dict, *, region_id: int | None, notes: str) -> None:
+    """Keep ``plan['topology'].faces[*].notes`` in sync with the legacy
+    ``main`` / ``regions`` notes inputs. ``region_id=None`` means main."""
+    topo = plan.get("topology")
+    if topo is None:
+        return
+    for face in topo.get("faces", []):
+        if region_id is None and face.get("kind") == "main":
+            face["notes"] = notes
+            return
+        if region_id is not None and face.get("region_id") == region_id:
+            face["notes"] = notes
+            return
 
 
 @app.delete("/api/sessions/{session_id}/region/{region_id}")
 async def api_delete_region(session_id: str, region_id: int) -> dict:
     plan = _load_plan(session_id)
+    before = len(plan.get("regions", []))
     plan["regions"] = [r for r in plan.get("regions", []) if r["id"] != region_id]
+    if len(plan["regions"]) == before:
+        raise HTTPException(404, f"unknown region {region_id}")
+    had_topology = plan.get("topology") is not None
     _save_plan(session_id, plan)
+    if had_topology:
+        # Rebuild topology so the deleted region's area is re-absorbed by
+        # its neighbours via Voronoi assignment.
+        if plan.get("regions"):
+            await api_snap(session_id)
+            plan = _load_plan(session_id)
+        else:
+            # No regions left — clear topology too; leaves only main.
+            plan["topology"] = None
+            plan["snapped"] = False
+            _save_plan(session_id, plan)
+        return {"ok": True, "snapped": True, "plan": plan}
     return {"ok": True}
 
 
@@ -763,41 +931,59 @@ async def api_auto_detect(session_id: str, payload: dict = Body(default={})) -> 
 @app.post("/api/sessions/{session_id}/snap")
 async def api_snap(session_id: str) -> dict:
     """Push/pull polygon borders so they share clean edges and tile the
-    room without gaps or overlap.
+    room without gaps or overlap, and produce a planar topology where
+    every shared boundary is stored as one edge referenced by both faces.
 
-    Voronoi-style nearest-polygon assignment:
+    Pipeline:
 
-    1. Rasterise the room outline + every polygon (main, regions) onto
-       the same pixel grid as the height map.
-    2. For each pixel inside the room, compute the Euclidean distance
-       to each polygon and assign that pixel to the nearest one. This
-       grows polygons into the black gaps between them and stops them
-       at the midline between neighbours.
-    3. Each polygon's claimed pixel set is morphologically closed to
-       smooth jaggies, then traced and simplified back to a vertex
-       polygon (≈5 cm tolerance).
-    4. Re-run the height analysis on every snapped polygon so the
-       heatmap and σ reflect the new shape.
+    1. Voronoi-style assignment of every room pixel to its nearest drawn
+       polygon (regions win their drawn pixels first, then main, then
+       distance-transform fill into the gaps).
+    2. Morphological close on each face's claim to smooth jaggies, then
+       merge back into a single label image.
+    3. ``topology.build_from_assignment`` traces boundaries at corner
+       resolution, simplifies once per shared edge, and emits
+       ``{vertices, edges, faces}``.
+    4. Re-run the height analysis on every face polygon so heatmaps and
+       σ reflect the new shapes; populate ``main`` and ``regions`` with
+       the derived polygons so the existing frontend renders unchanged
+       while the topology underlies it.
 
-    Polygon ids and labels are preserved.
+    After snap, the *topology* is the source of truth — editing should go
+    through the topology endpoints so shared edges move both faces
+    together. ``main`` and ``regions`` are kept as a derived view.
     """
     from .analyse import polygon_to_mask
-    from .polygons import mask_to_polygon
+    from .topology import build_from_assignment, OUTSIDE
 
     plan = _load_plan(session_id)
     room_pts = plan.get("room")
     if not room_pts or len(room_pts) < 3:
         raise HTTPException(400, "room outline required before snapping")
 
-    height_map, grid = _load_height_map(session_id)
+    _, grid = _load_height_map(session_id)
     room_mask = polygon_to_mask([tuple(p) for p in room_pts], grid) > 0
     if not room_mask.any():
         raise HTTPException(409, "room polygon doesn't overlap the rendered area")
+
+    # Subtract obstructions (columns) from the room mask so ceiling regions
+    # can't claim those pixels. Voronoi-driven gap filling later in this
+    # function then can't push into the column either, since the obstruction
+    # area is treated as outside-the-room.
+    for obs in plan.get("obstructions", []):
+        if len(obs.get("polygon", [])) >= 3:
+            obs_mask = polygon_to_mask(
+                [tuple(p) for p in obs["polygon"]], grid,
+            ) > 0
+            room_mask = room_mask & ~obs_mask
+    if not room_mask.any():
+        raise HTTPException(409, "obstructions cover the entire room")
 
     polygons: list[dict] = []
     if plan.get("main"):
         polygons.append({
             "key": "main",
+            "kind": "main",
             "polygon": plan["main"]["polygon"],
             "label": plan["main"].get("label", "Main Ceiling (1)"),
             "tint": MAIN_TINT,
@@ -806,6 +992,7 @@ async def api_snap(session_id: str) -> dict:
     for r in plan.get("regions", []):
         polygons.append({
             "key": f"region:{r['id']}",
+            "kind": "region",
             "id": int(r["id"]),
             "polygon": r["polygon"],
             "label": r.get("label", f"Ceiling Region ({int(r['id']) + 2})"),
@@ -814,6 +1001,8 @@ async def api_snap(session_id: str) -> dict:
         })
     if not polygons:
         raise HTTPException(409, "draw a main ceiling and any regions before snapping")
+    if polygons[0]["kind"] != "main":
+        raise HTTPException(409, "main ceiling required before snapping")
 
     H, W = grid.height, grid.width
 
@@ -832,19 +1021,14 @@ async def api_snap(session_id: str) -> dict:
     # Stage 1: each region keeps its drawn pixels; later-drawn wins overlap.
     assignment = np.full((H, W), -1, dtype=np.int32)
     for i, p in enumerate(polygons):
-        if not p["key"].startswith("region:"):
+        if p["kind"] != "region":
             continue
         assignment[drawn_masks[i]] = i
 
     # Stage 2: main claims its drawn pixels that no region took.
-    main_idx = next(
-        (i for i, p in enumerate(polygons) if p["key"] == "main"),
-        -1,
-    )
-    if main_idx >= 0:
-        main_drawn = drawn_masks[main_idx]
-        free = main_drawn & (assignment == -1)
-        assignment[free] = main_idx
+    main_drawn = drawn_masks[0]
+    free = main_drawn & (assignment == -1)
+    assignment[free] = 0
 
     # Stage 3: any pixel still inside the room but unassigned grows the
     # closest polygon out to fill it (Voronoi between drawn shapes).
@@ -854,68 +1038,301 @@ async def api_snap(session_id: str) -> dict:
         assignment[gap] = nearest[gap]
 
     # Pixels outside the room belong to nobody.
-    assignment_room = np.where(room_mask, assignment, -1)
+    assignment_room = np.where(room_mask, assignment, OUTSIDE)
 
+    # Smooth the per-face boundaries, then re-merge into a label image
+    # the topology builder can trace.
     px_per_m = grid.pixels_per_metre
     close_kernel = cv2.getStructuringElement(
         cv2.MORPH_ELLIPSE,
         (max(3, int(round(0.06 * px_per_m)) | 1),) * 2,
     )
-
-    snapped_polys: dict[str, list[list[float]]] = {}
-    for i, p in enumerate(polygons):
+    smoothed = np.full_like(assignment_room, OUTSIDE)
+    for i in range(len(polygons)):
         claim = (assignment_room == i).astype(np.uint8) * 255
         if claim.sum() == 0:
             continue
         claim = cv2.morphologyEx(claim, cv2.MORPH_CLOSE, close_kernel, iterations=2)
-        coords = mask_to_polygon(claim, grid, simplify_m=0.05)
-        if len(coords) >= 3:
-            snapped_polys[p["key"]] = [[float(x), float(z)] for x, z in coords]
+        # Smoothing can grow the claim outside the room; clip back.
+        claim = (claim > 0) & room_mask
+        # Later-iterated faces overwrite earlier (rare overlap from dilation
+        # in tight gaps). Net effect is small because closes are 1-2 px.
+        smoothed[claim] = i
 
-    # Re-analyse and rebuild plan
-    main_coords = snapped_polys.get("main")
-    if main_coords is None:
+    # Any pixel that smoothing left unassigned: hand to nearest face.
+    leftover = room_mask & (smoothed == OUTSIDE)
+    if leftover.any():
+        nearest = np.argmin(dist_stack, axis=0)
+        smoothed[leftover] = nearest[leftover]
+
+    topo = build_from_assignment(smoothed, grid)
+    if not topo["faces"]:
+        raise HTTPException(409, "snap produced no faces — try widening the room polygon")
+
+    # Decorate each topology face with the matching polygon's metadata +
+    # a fresh height analysis on the new polygon shape.
+    main_face = next((f for f in topo["faces"] if f["id"] == 0), None)
+    if main_face is None:
         raise HTTPException(409, "main ceiling lost all coverage after snapping")
+    main_coords = main_face["polygon"]
+    main_meta = polygons[0]
     main_analysis = _analyse_and_pack(session_id, main_coords, tint=MAIN_TINT)
+    main_face.update({
+        "label": main_meta["label"],
+        "notes": main_meta["notes"],
+        "tint": MAIN_TINT,
+        "relative_y": 0.0,
+        **main_analysis,
+    })
     plan["main"] = {
         "polygon": main_coords,
-        "label": polygons[0]["label"],
-        "notes": polygons[0]["notes"],
+        "label": main_meta["label"],
+        "notes": main_meta["notes"],
         **main_analysis,
     }
     datum = main_analysis["stats"]["mean_y"]
 
     new_regions = []
-    for p in polygons:
-        if not p["key"].startswith("region:"):
+    for face in topo["faces"]:
+        if face["id"] == 0:
             continue
-        coords = snapped_polys.get(p["key"])
-        if coords is None:
-            continue
-        rid = int(p["id"])
+        meta = polygons[face["id"]]  # face id matches polygons-list index
+        coords = face["polygon"]
+        rid = int(meta["id"])
         analysis = _analyse_and_pack(session_id, coords, tint=_region_tint(rid))
         m = analysis["stats"]["mean_y"]
-        new_regions.append({
-            "id": rid,
-            "label": p["label"],
-            "notes": p["notes"],
-            "polygon": coords,
-            "relative_y": (m - datum) if (m is not None and datum is not None) else None,
+        relative_y = (m - datum) if (m is not None and datum is not None) else None
+        face.update({
+            "region_id": rid,
+            "label": meta["label"],
+            "notes": meta["notes"],
+            "tint": _region_tint(rid),
+            "relative_y": relative_y,
             **analysis,
         })
+        new_regions.append({
+            "id": rid,
+            "label": meta["label"],
+            "notes": meta["notes"],
+            "polygon": coords,
+            "relative_y": relative_y,
+            **analysis,
+        })
+
+    plan["topology"] = topo
     plan["regions"] = new_regions
     plan["snapped"] = True
     _save_plan(session_id, plan)
     return plan
 
 
+# ─── TOPOLOGY EDITS (post-snap) ───────────────────────────────────────────────
+
+
+def _resolve_face_polygon(face: dict, edges: list[dict], vertices: list[list[float]]) -> list[list[float]]:
+    """Walk a face's ring of {edge, rev} entries against the given vertex pool."""
+    edges_by_id = {e["id"]: e for e in edges}
+    pts: list[list[float]] = []
+    for h in face["ring"]:
+        e = edges_by_id[h["edge"]]
+        verts = list(reversed(e["vertices"])) if h["rev"] else e["vertices"]
+        for vid in verts[:-1]:
+            x, z = vertices[vid]
+            pts.append([float(x), float(z)])
+    return pts
+
+
+def _refresh_topology_polygons(plan: dict, session_id: str) -> None:
+    """After mutating ``plan['topology']['vertices']`` (or any face's ring),
+    rebuild every face's ``polygon``, re-run the height analysis on it, and
+    sync the derived ``main`` / ``regions`` views the frontend reads."""
+    topo = plan["topology"]
+    if topo is None:
+        return
+
+    vertices = topo["vertices"]
+    edges = topo["edges"]
+
+    main_face = next((f for f in topo["faces"] if f["id"] == 0), None)
+    datum = None
+    if main_face is not None:
+        coords = _resolve_face_polygon(main_face, edges, vertices)
+        if len(coords) < 3:
+            raise HTTPException(409, "main face collapsed to fewer than 3 vertices")
+        analysis = _analyse_and_pack(session_id, coords, tint=MAIN_TINT)
+        main_face["polygon"] = coords
+        main_face.update({
+            "label": main_face.get("label", "Main Ceiling (1)"),
+            "notes": main_face.get("notes", ""),
+            "tint": MAIN_TINT,
+            "relative_y": 0.0,
+            **analysis,
+        })
+        datum = analysis["stats"]["mean_y"]
+        plan["main"] = {
+            "polygon": coords,
+            "label": main_face.get("label", "Main Ceiling (1)"),
+            "notes": main_face.get("notes", ""),
+            **analysis,
+        }
+
+    new_regions = []
+    for face in topo["faces"]:
+        if face["id"] == 0:
+            continue
+        coords = _resolve_face_polygon(face, edges, vertices)
+        if len(coords) < 3:
+            # Face collapsed; drop it (topology stays but the region view skips).
+            continue
+        rid = int(face.get("region_id", face["id"] - 1))
+        analysis = _analyse_and_pack(session_id, coords, tint=_region_tint(rid))
+        m = analysis["stats"]["mean_y"]
+        relative_y = (m - datum) if (m is not None and datum is not None) else None
+        face["polygon"] = coords
+        face.update({
+            "tint": _region_tint(rid),
+            "relative_y": relative_y,
+            **analysis,
+        })
+        new_regions.append({
+            "id": rid,
+            "label": face.get("label", f"Ceiling Region ({rid + 2})"),
+            "notes": face.get("notes", ""),
+            "polygon": coords,
+            "relative_y": relative_y,
+            **analysis,
+        })
+    plan["regions"] = new_regions
+
+
+@app.put("/api/sessions/{session_id}/topology/vertices")
+async def api_topology_set_vertices(session_id: str, payload: dict = Body(...)) -> dict:
+    """Replace the topology's vertex pool. Edges and faces keep their
+    structure (they reference indices into this pool), so moving a vertex
+    that's shared by two faces shifts both face polygons in lockstep —
+    which is the whole point of having shared edges."""
+    plan = _load_plan(session_id)
+    topo = plan.get("topology")
+    if topo is None:
+        raise HTTPException(409, "no topology yet — snap first")
+    new_verts = payload.get("vertices")
+    if not isinstance(new_verts, list) or len(new_verts) != len(topo["vertices"]):
+        raise HTTPException(
+            400,
+            f"expected {len(topo['vertices'])} vertices, got "
+            f"{len(new_verts) if isinstance(new_verts, list) else 'invalid'}",
+        )
+    topo["vertices"] = [[float(p[0]), float(p[1])] for p in new_verts]
+    _refresh_topology_polygons(plan, session_id)
+    _save_plan(session_id, plan)
+    return plan
+
+
+@app.delete("/api/sessions/{session_id}/topology")
+async def api_topology_clear(session_id: str) -> dict:
+    """Un-snap. Drops the topology and leaves the legacy ``main`` /
+    ``regions`` polygons intact at their last derived shape, so the user
+    can edit them with the original tools and then re-snap."""
+    plan = _load_plan(session_id)
+    plan["topology"] = None
+    plan["snapped"] = False
+    _save_plan(session_id, plan)
+    return plan
+
+
+@app.post("/api/sessions/{session_id}/topology/edge/{edge_id}/insert_vertex")
+async def api_topology_insert_vertex(
+    session_id: str, edge_id: int, payload: dict = Body(...),
+) -> dict:
+    """Split a topology edge by inserting a new vertex at ``position``.
+
+    Both faces incident to the edge gain the new vertex in their boundary
+    rings — the headline ``shared edges stay shared`` property carries
+    through the split.
+    """
+    from .topology import insert_vertex_on_edge
+
+    pos = payload.get("position")
+    if not (isinstance(pos, list) and len(pos) == 2):
+        raise HTTPException(400, "position must be [x, z]")
+    plan = _load_plan(session_id)
+    topo = plan.get("topology")
+    if topo is None:
+        raise HTTPException(409, "no topology yet — snap first")
+    try:
+        insert_vertex_on_edge(topo, edge_id, (float(pos[0]), float(pos[1])))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    _refresh_topology_polygons(plan, session_id)
+    _save_plan(session_id, plan)
+    return plan
+
+
+@app.delete("/api/sessions/{session_id}/topology/vertex/{vertex_id}")
+async def api_topology_delete_vertex(session_id: str, vertex_id: int) -> dict:
+    """Remove a topology vertex.
+
+    Supported cases:
+
+    - **Interior vertex** of a single edge's polyline → spliced out.
+    - **Degree-2 endpoint** (two edges with the same face pair) → the
+      two edges merge into one.
+
+    Junction vertices (3+ incident edges with mixed face pairs) reject
+    with 400 — that's a face-level edit, not a vertex edit.
+    """
+    from .topology import delete_vertex as topo_delete_vertex
+
+    plan = _load_plan(session_id)
+    topo = plan.get("topology")
+    if topo is None:
+        raise HTTPException(409, "no topology yet — snap first")
+    if not (0 <= vertex_id < len(topo["vertices"])):
+        raise HTTPException(404, f"unknown vertex {vertex_id}")
+    try:
+        topo_delete_vertex(topo, vertex_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    _refresh_topology_polygons(plan, session_id)
+    _save_plan(session_id, plan)
+    return plan
+
+
+@app.put("/api/sessions/{session_id}/topology/face/{face_id}/notes")
+async def api_topology_set_face_notes(
+    session_id: str, face_id: int, payload: dict = Body(...),
+) -> dict:
+    """Update a face's notes (post-snap). Mirrors the value into the
+    derived ``main`` / ``regions`` view so the frontend's existing notes
+    inputs keep working without knowing about topology."""
+    plan = _load_plan(session_id)
+    topo = plan.get("topology")
+    if topo is None:
+        raise HTTPException(409, "no topology yet — snap first")
+    face = next((f for f in topo["faces"] if f["id"] == face_id), None)
+    if face is None:
+        raise HTTPException(404, f"unknown face {face_id}")
+    notes = str(payload.get("notes", ""))
+    face["notes"] = notes
+    if face_id == 0 and plan.get("main"):
+        plan["main"]["notes"] = notes
+    else:
+        rid = int(face.get("region_id", face_id - 1))
+        for r in plan.get("regions", []):
+            if r["id"] == rid:
+                r["notes"] = notes
+                break
+    _save_plan(session_id, plan)
+    return {"ok": True}
+
+
 # ─── PDF EXPORT ───────────────────────────────────────────────────────────────
 
 @app.get("/api/sessions/{session_id}/pdf")
 async def api_pdf(session_id: str) -> Response:
-    """Produce an architectural PDF: coloured masks (no heatmap), each tagged
-    with its label and relative height, and dimension lines along every
-    edge of the room outline."""
+    """Produce an architectural PDF: coloured fills per face, then each
+    *edge* stroked exactly once. Pre-snap (no topology) falls back to the
+    old per-polygon stroking — those plans don't have shared edges yet."""
     plan = _load_plan(session_id)
     if not plan.get("room"):
         raise HTTPException(400, "room required for PDF")
@@ -929,6 +1346,7 @@ async def api_pdf(session_id: str) -> Response:
     room = plan["room"]
     main = plan.get("main")
     regions = plan.get("regions", [])
+    topo = plan.get("topology")
 
     xs = [p[0] for p in room]
     zs = [p[1] for p in room]
@@ -951,12 +1369,26 @@ async def api_pdf(session_id: str) -> Response:
     for spine in ax.spines.values():
         spine.set_visible(False)
 
-    def _draw_poly(poly_pts, *, face, edge, label, rel_text, notes, alpha=0.45):
+    # ─── Fills + labels ──
+    # When a topology is present, both `_fill` (no edge) and `_stroke_edges`
+    # below are used so each shared boundary is drawn exactly once. Without
+    # a topology, fall back to drawing each polygon outline as part of the
+    # patch (the legacy double-stroke behaviour, accepted for pre-snap
+    # plans).
+    use_topology = topo is not None and bool(topo.get("edges"))
+    fill_alpha = 0.45
+
+    def _fill(poly_pts, *, face_color, edge_color, label, rel_text, notes):
         if not poly_pts:
             return
         pts = [(p[0], p[1]) for p in poly_pts]
-        patch = MplPolygon(pts, closed=True, facecolor=face, edgecolor=edge,
-                           linewidth=1.5, alpha=alpha)
+        if use_topology:
+            patch = MplPolygon(pts, closed=True, facecolor=face_color,
+                               edgecolor="none", alpha=fill_alpha)
+        else:
+            patch = MplPolygon(pts, closed=True, facecolor=face_color,
+                               edgecolor=edge_color, linewidth=1.5,
+                               alpha=fill_alpha)
         ax.add_patch(patch)
         cx = sum(p[0] for p in pts) / len(pts)
         cz = sum(p[1] for p in pts) / len(pts)
@@ -967,14 +1399,14 @@ async def api_pdf(session_id: str) -> Response:
                 ha="center", va="center",
                 fontsize=8, fontweight="bold",
                 bbox=dict(boxstyle="round,pad=0.25",
-                          facecolor="white", edgecolor=edge, linewidth=0.6))
+                          facecolor="white", edgecolor=edge_color, linewidth=0.6))
 
     if main:
-        _draw_poly(main["polygon"],
-                   face=MAIN_TINT, edge="#00897b",
-                   label=main.get("label", "Main Ceiling (1)"),
-                   rel_text="0 mm",
-                   notes=main.get("notes", ""))
+        _fill(main["polygon"],
+              face_color=MAIN_TINT, edge_color="#00897b",
+              label=main.get("label", "Main Ceiling (1)"),
+              rel_text="0 mm",
+              notes=main.get("notes", ""))
 
     for r in regions:
         rel = r.get("relative_y")
@@ -983,17 +1415,55 @@ async def api_pdf(session_id: str) -> Response:
         else:
             sign = "+" if rel >= 0 else "−"
             rel_text = f"{sign}{abs(rel) * 1000:.0f} mm"
-        _draw_poly(r["polygon"],
-                   face=r.get("tint", "#ff7043"),
-                   edge="#444",
-                   label=r.get("label", f"region {r['id']}"),
-                   rel_text=rel_text,
-                   notes=r.get("notes", ""))
+        _fill(r["polygon"],
+              face_color=r.get("tint", "#ff7043"),
+              edge_color="#444",
+              label=r.get("label", f"region {r['id']}"),
+              rel_text=rel_text,
+              notes=r.get("notes", ""))
 
-    # Room outline + dimension lines
+    # ─── Edges (one stroke per topology edge) ──
+    # Interior edges (shared between two faces) get the standard line
+    # weight. Boundary edges (against the room outside) get the heavier
+    # outline weight that the room outline used to use.
+    if use_topology:
+        verts = topo["vertices"]
+        for e in topo["edges"]:
+            xs_e = [verts[vid][0] for vid in e["vertices"]]
+            zs_e = [verts[vid][1] for vid in e["vertices"]]
+            is_boundary = e["faces"][1] is None or e["faces"][0] is None
+            ax.plot(xs_e, zs_e,
+                    color="#222",
+                    linewidth=2.0 if is_boundary else 1.2,
+                    linestyle="-")
+
+    # Room outline (always shown — it's the user-traced boundary, not
+    # necessarily the same as the topology's outermost edges if the snap
+    # fell short of the room's extent).
     rxs = [p[0] for p in room] + [room[0][0]]
     rzs = [p[1] for p in room] + [room[0][1]]
-    ax.plot(rxs, rzs, color="#222", linewidth=2.0, linestyle="--")
+    ax.plot(rxs, rzs, color="#222",
+            linewidth=2.0,
+            linestyle="--" if use_topology else "--")
+
+    # ─── Obstructions (columns) — hatched on top of fills ──
+    # Drawn last so the cross-hatch reads above any region fill that
+    # might otherwise be visible inside the column outline.
+    for obs in plan.get("obstructions", []):
+        pts = [(p[0], p[1]) for p in obs.get("polygon", [])]
+        if len(pts) < 3:
+            continue
+        patch = MplPolygon(pts, closed=True,
+                           facecolor="white", edgecolor="#222",
+                           linewidth=1.5, hatch="//", alpha=1.0)
+        ax.add_patch(patch)
+        cx = sum(p[0] for p in pts) / len(pts)
+        cz = sum(p[1] for p in pts) / len(pts)
+        ax.text(cx, cz, obs.get("label", "Column"),
+                ha="center", va="center",
+                fontsize=7, fontweight="bold", color="#222",
+                bbox=dict(boxstyle="round,pad=0.18",
+                          facecolor="white", edgecolor="#222", linewidth=0.5))
 
     n = len(room)
     for i in range(n):

@@ -1,4 +1,202 @@
-console.log("[ceiling-rcp] app.js build 8 — auto-detect");
+console.log("[ceiling-rcp] app.js build 10 — topology edits, shift-snap, columns");
+
+// ─── TOPOLOGY HELPERS ─────────────────────────────────────────────────────
+// Post-snap, plan.topology is the source of truth: a planar graph where
+// shared edges between two faces are stored ONCE. Vertex drags here update
+// the topology, which then re-derives every affected face polygon — so
+// dragging a wall between two ceiling regions moves both at the same time.
+
+const TOPOLOGY_VERTEX_TOL_M = 0.005;  // 5 mm — tighter than RDP simplify
+
+function topologyVertexAtWorld(x, z, tolM = TOPOLOGY_VERTEX_TOL_M) {
+  // Returns the topology vertex id within `tolM` of (x, z), or -1 if none.
+  // Default tolerance (5mm) is for vertex-pickup on drag — exact-match
+  // resolution. Pass a wider tolerance for click-to-delete (~5cm).
+  const topo = state.plan?.topology;
+  if (!topo) return -1;
+  let best = -1, bestD = tolM;
+  for (let i = 0; i < topo.vertices.length; i++) {
+    const v = topo.vertices[i];
+    const d = Math.hypot(v[0] - x, v[1] - z);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best;
+}
+
+function nearestTopologyEdge(x, z) {
+  // Return {edgeId, proj: [x, z], distPx} for the topology edge closest
+  // to (x, z). Distance is computed in canvas pixels for tool-radius
+  // checks; projection is in world coords for the insert payload.
+  const topo = state.plan?.topology;
+  if (!topo) return null;
+  let best = null;
+  let bestD = Infinity;
+  for (const e of topo.edges) {
+    for (let k = 0; k < e.vertices.length - 1; k++) {
+      const a = topo.vertices[e.vertices[k]];
+      const b = topo.vertices[e.vertices[k + 1]];
+      const dx = b[0] - a[0], dz = b[1] - a[1];
+      const L2 = dx * dx + dz * dz;
+      if (L2 < 1e-12) continue;
+      let t = ((x - a[0]) * dx + (z - a[1]) * dz) / L2;
+      t = Math.max(0, Math.min(1, t));
+      const px = a[0] + t * dx, pz = a[1] + t * dz;
+      const dWorld = Math.hypot(px - x, pz - z);
+      if (dWorld < bestD) {
+        bestD = dWorld;
+        best = { edgeId: e.id, proj: [px, pz], distWorld: dWorld };
+      }
+    }
+  }
+  if (best) {
+    // Convert world distance to canvas pixels using the grid + view scale
+    // so the tool-radius threshold (12 px) is consistent with other tools.
+    const ppm = state.plan.grid.pixels_per_metre;
+    best.distPx = best.distWorld * ppm * state.view.scale;
+  }
+  return best;
+}
+
+async function insertVertexOnTopologyEdge(edgeId, projWorld) {
+  const r = await fetch(
+    `/api/sessions/${state.sessionId}/topology/edge/${edgeId}/insert_vertex`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ position: projWorld }),
+    },
+  );
+  if (!r.ok) {
+    setBanner("Insert vertex failed: " + (await r.text()).slice(0, 120), true);
+    return;
+  }
+  state.plan = await r.json();
+  await refreshAllHeatmaps();
+  refreshPolygonsList();
+  draw();
+}
+
+async function deleteTopologyVertex(vid) {
+  const r = await fetch(
+    `/api/sessions/${state.sessionId}/topology/vertex/${vid}`,
+    { method: "DELETE" },
+  );
+  if (!r.ok) {
+    setBanner("Delete vertex failed: " + (await r.text()).slice(0, 120), true);
+    return;
+  }
+  state.plan = await r.json();
+  await refreshAllHeatmaps();
+  refreshPolygonsList();
+  draw();
+}
+
+async function unsnapTopology() {
+  if (!confirm("Un-snap clears the shared-edge topology. The current ceiling regions stay; you can edit them and re-snap. Continue?")) return;
+  const r = await fetch(`/api/sessions/${state.sessionId}/topology`, { method: "DELETE" });
+  if (!r.ok) {
+    setBanner("Un-snap failed: " + (await r.text()).slice(0, 120), true);
+    return;
+  }
+  state.plan = await r.json();
+  await refreshAllHeatmaps();
+  refreshPolygonsList();
+  draw();
+  setBanner("Un-snapped — edit polygons then re-snap.");
+  setTimeout(() => banner.classList.remove("show"), 2500);
+}
+
+function constrainShiftSnap(x, z) {
+  // Returns [x, z] for the next vertex constrained to be either collinear
+  // with the previous edge or 90° to it — whichever is closer to the
+  // cursor. Needs at least one previous edge (≥ 2 draft vertices). The
+  // anchor is the LAST drafted vertex; the direction reference is the
+  // edge from the second-to-last to the last vertex.
+  const n = state.draft.length;
+  if (n === 0) return null;
+  if (n === 1) {
+    // Only one vertex placed: snap horizontal/vertical from it.
+    const a = state.draft[0];
+    const dx = x - a[0], dz = z - a[1];
+    return Math.abs(dx) > Math.abs(dz) ? [a[0] + dx, a[1]] : [a[0], a[1] + dz];
+  }
+  const a = state.draft[n - 2];
+  const b = state.draft[n - 1];
+  const dx = b[0] - a[0], dz = b[1] - a[1];
+  const L = Math.hypot(dx, dz);
+  if (L < 1e-6) return null;
+  const ux = dx / L, uz = dz / L;       // along previous edge
+  const px = -uz, pz = ux;              // perpendicular (90° CCW in world)
+  const rx = x - b[0], rz = z - b[1];
+  const tParallel = rx * ux + rz * uz;
+  const tPerp = rx * px + rz * pz;
+  if (Math.abs(tPerp) > Math.abs(tParallel)) {
+    return [b[0] + tPerp * px, b[1] + tPerp * pz];
+  }
+  return [b[0] + tParallel * ux, b[1] + tParallel * uz];
+}
+
+async function refreshAllHeatmaps() {
+  state.heatmaps.clear();
+  if (state.plan.room_heatmap) await refreshHeatmap("room", state.plan.room_heatmap);
+  if (state.plan.main) await refreshHeatmap("main", state.plan.main);
+  for (const reg of state.plan.regions || [])
+    await refreshHeatmap("region:" + reg.id, reg);
+}
+
+function rederiveFacePolygons() {
+  // Walk every face's edge ring against the current vertex pool; mutate
+  // both `face.polygon` and the legacy main/regions polygon arrays the
+  // renderer reads, so a single vertex drag updates every shape that
+  // shares it.
+  const topo = state.plan?.topology;
+  if (!topo) return;
+  const edgesById = new Map(topo.edges.map(e => [e.id, e]));
+  for (const face of topo.faces) {
+    const pts = [];
+    for (const h of face.ring) {
+      const e = edgesById.get(h.edge);
+      if (!e) continue;
+      const verts = h.rev ? e.vertices.slice().reverse() : e.vertices;
+      for (let k = 0; k < verts.length - 1; k++) {
+        const v = topo.vertices[verts[k]];
+        pts.push([v[0], v[1]]);
+      }
+    }
+    face.polygon = pts;
+    if (face.id === 0 && state.plan.main) {
+      state.plan.main.polygon = pts;
+    } else if (face.id !== 0) {
+      const rid = face.region_id;
+      const r = (state.plan.regions || []).find(r => r.id === rid);
+      if (r) r.polygon = pts;
+    }
+  }
+}
+
+async function pushTopologyVertices() {
+  const topo = state.plan?.topology;
+  if (!topo) return;
+  const r = await fetch(
+    `/api/sessions/${state.sessionId}/topology/vertices`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ vertices: topo.vertices }),
+    },
+  );
+  if (!r.ok) {
+    setBanner("Topology update failed: " + (await r.text()).slice(0, 120), true);
+    return;
+  }
+  state.plan = await r.json();
+  state.heatmaps.clear();
+  if (state.plan.main) await refreshHeatmap("main", state.plan.main);
+  for (const reg of state.plan.regions || [])
+    await refreshHeatmap("region:" + reg.id, reg);
+  refreshPolygonsList();
+  draw();
+}
 
 // ─── STATE ────────────────────────────────────────────────────────────────
 const state = {
@@ -41,6 +239,7 @@ document.getElementById("file-input-flat").addEventListener("change",
 document.getElementById("btn-room").onclick = () => startDraw("room");
 document.getElementById("btn-main").onclick = () => startDraw("main");
 document.getElementById("btn-region").onclick = () => startDraw("region");
+document.getElementById("btn-column").onclick = () => startDraw("column");
 
 document.querySelectorAll(".tool").forEach(b => {
   b.onclick = () => {
@@ -56,6 +255,7 @@ document.querySelectorAll(".tool").forEach(b => {
 });
 
 document.getElementById("btn-snap").onclick = snapPolygons;
+document.getElementById("btn-unsnap").onclick = unsnapTopology;
 document.getElementById("btn-pdf").onclick = downloadPdf;
 document.getElementById("btn-export").onclick = exportPlan;
 document.getElementById("btn-autodetect").onclick = autoDetect;
@@ -198,6 +398,7 @@ function setReport(text, cls) {
 function startDraw(kind) {
   if (kind === "main" && !state.plan.room) return;
   if (kind === "region" && !state.plan.main) return;
+  if (kind === "column" && !state.plan.room) return;
   state.mode = "draw_" + kind;
   state.draft = [];
   state.selection = null;
@@ -205,6 +406,7 @@ function startDraw(kind) {
     room: "Drawing ROOM outline — click vertices, click first or press Enter to close. Esc = cancel",
     main: "Drawing MAIN CEILING — defines height datum (relative = 0)",
     region: "Drawing CEILING REGION — relative to main ceiling",
+    column: "Drawing COLUMN — ceiling regions stop at its boundary. Hold Shift to lock 90°.",
   }[kind];
   banner.classList.add("show");
   document.querySelector(".tool[data-tool='cancel-draw']").disabled = false;
@@ -247,6 +449,7 @@ async function commitDraft() {
       if (d.room_heatmap) await refreshHeatmap("room", d.room_heatmap);
       markStepDone("room");
       unlockStep("main");
+      unlockStep("column");
       document.getElementById("btn-autodetect").disabled = false;
     }
   } else if (kind === "main") {
@@ -271,9 +474,36 @@ async function commitDraft() {
     });
     if (r.ok) {
       const d = await r.json();
-      state.plan.regions = state.plan.regions || [];
-      state.plan.regions.push(d.region);
-      await refreshHeatmap("region:" + d.region.id, d.region);
+      if (d.snapped && d.plan) {
+        // Server auto re-snapped — replace the whole plan and refresh
+        // every heatmap because face shapes (and therefore stats) all
+        // changed.
+        state.plan = d.plan;
+        await refreshAllHeatmaps();
+      } else {
+        state.plan.regions = state.plan.regions || [];
+        state.plan.regions.push(d.region);
+        await refreshHeatmap("region:" + d.region.id, d.region);
+      }
+    } else {
+      setBanner("Add region failed: " + (await r.text()).slice(0, 120), true);
+    }
+  } else if (kind === "column") {
+    const r = await fetch(`/api/sessions/${state.sessionId}/obstruction`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ polygon, kind: "column" }),
+    });
+    if (r.ok) {
+      const d = await r.json();
+      if (d.snapped && d.plan) {
+        state.plan = d.plan;
+        await refreshAllHeatmaps();
+      } else {
+        state.plan.obstructions = state.plan.obstructions || [];
+        state.plan.obstructions.push(d.obstruction);
+      }
+    } else {
+      setBanner("Add column failed: " + (await r.text()).slice(0, 120), true);
     }
   }
   refreshPolygonsList();
@@ -288,11 +518,38 @@ async function refreshHeatmap(key, polyObj) {
 }
 
 async function deletePolygon(kind, regionId) {
-  if (kind === "region") {
-    await fetch(`/api/sessions/${state.sessionId}/region/${regionId}`,
+  if (kind === "column") {
+    const r = await fetch(`/api/sessions/${state.sessionId}/obstruction/${regionId}`,
       { method: "DELETE" });
-    state.plan.regions = state.plan.regions.filter(r => r.id !== regionId);
-    state.heatmaps.delete("region:" + regionId);
+    if (r.ok) {
+      const d = await r.json();
+      if (d.snapped && d.plan) {
+        state.plan = d.plan;
+        await refreshAllHeatmaps();
+      } else {
+        state.plan.obstructions = (state.plan.obstructions || []).filter(o => o.id !== regionId);
+      }
+    }
+    state.selection = null;
+    refreshPolygonsList();
+    draw();
+    return;
+  }
+  if (kind === "region") {
+    const r = await fetch(`/api/sessions/${state.sessionId}/region/${regionId}`,
+      { method: "DELETE" });
+    if (r.ok) {
+      const d = await r.json();
+      if (d.snapped && d.plan) {
+        // Auto re-snap after delete: the deleted region's area is
+        // re-absorbed by neighbours, so every face needs a fresh heatmap.
+        state.plan = d.plan;
+        await refreshAllHeatmaps();
+      } else {
+        state.plan.regions = state.plan.regions.filter(r => r.id !== regionId);
+        state.heatmaps.delete("region:" + regionId);
+      }
+    }
   } else if (kind === "room") {
     await fetch(`/api/sessions/${state.sessionId}/room`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
@@ -442,6 +699,12 @@ async function downloadPdf() {
 
 // ─── POLYGON LIST ─────────────────────────────────────────────────────────
 function refreshPolygonsList() {
+  // Show Un-snap only when a topology exists; show Snap always pre-snap.
+  const hasTopology = !!state.plan?.topology;
+  document.getElementById("btn-unsnap").hidden = !hasTopology;
+  document.getElementById("btn-snap").textContent =
+    hasTopology ? "Re-snap (rebuild from current polygons)" : "Snap polygons";
+
   const ul = document.getElementById("polygons-list");
   ul.innerHTML = "";
 
@@ -511,6 +774,11 @@ function refreshPolygonsList() {
       r.tint || "#ff7043",
       `${relTxt}  σ${(s.std_y * 1000).toFixed(0)} mm`,
       "region:" + r.id, r.notes, true);
+  }
+  for (const o of state.plan.obstructions || []) {
+    addRow("column:" + o.id, o.label || `Column (${o.id + 1})`,
+      "#ffffff", `${o.polygon.length} verts`,
+      "column:" + o.id, null, false);
   }
   updateSelectionInfo();
 }
@@ -634,6 +902,11 @@ function draw() {
       selectedKey: "region:" + r.id,
     });
   }
+  // Obstructions (columns) — hatched fill on top so the negative space
+  // reads above any region tint that briefly bleeds through after a snap.
+  for (const o of state.plan.obstructions || []) {
+    drawObstruction(o);
+  }
   // Hover preview for insert-vertex
   if (state.tool === "insert-vertex" && state.selection && state.hover.world) {
     drawInsertPreview();
@@ -687,6 +960,50 @@ function drawPolygon(poly, opts) {
       ctx.stroke();
     }
   }
+}
+
+function drawObstruction(o) {
+  if (!o?.polygon || o.polygon.length < 3) return;
+  const poly = o.polygon;
+  // Build the polygon path in image coords and fill with white so the
+  // ceiling underneath reads as masked-off, then hatch on top.
+  ctx.save();
+  ctx.beginPath();
+  for (let i = 0; i < poly.length; i++) {
+    const p = worldToImg(poly[i][0], poly[i][1]);
+    if (i === 0) ctx.moveTo(p.u, p.v); else ctx.lineTo(p.u, p.v);
+  }
+  ctx.closePath();
+  ctx.fillStyle = "rgba(255,255,255,0.85)";
+  ctx.fill();
+  // Hatched stroke pattern: clip to the polygon, then stroke a grid of
+  // diagonal lines. Cheap and crisp at any zoom.
+  ctx.clip();
+  const minU = Math.min(...poly.map(p => worldToImg(p[0], p[1]).u));
+  const maxU = Math.max(...poly.map(p => worldToImg(p[0], p[1]).u));
+  const minV = Math.min(...poly.map(p => worldToImg(p[0], p[1]).v));
+  const maxV = Math.max(...poly.map(p => worldToImg(p[0], p[1]).v));
+  const step = Math.max(6, 10 / state.view.scale);
+  ctx.strokeStyle = "#222";
+  ctx.lineWidth = 1.0 / state.view.scale;
+  ctx.beginPath();
+  for (let s = minU - (maxV - minV); s < maxU + (maxV - minV); s += step) {
+    ctx.moveTo(s, minV);
+    ctx.lineTo(s + (maxV - minV), maxV);
+  }
+  ctx.stroke();
+  ctx.restore();
+  // Outline last so it sits above the hatch.
+  ctx.beginPath();
+  for (let i = 0; i < poly.length; i++) {
+    const p = worldToImg(poly[i][0], poly[i][1]);
+    if (i === 0) ctx.moveTo(p.u, p.v); else ctx.lineTo(p.u, p.v);
+  }
+  ctx.closePath();
+  const isSelected = state.selection?.key === "column:" + o.id;
+  ctx.strokeStyle = isSelected ? "#00e5ff" : "#222";
+  ctx.lineWidth = (isSelected ? 2.0 : 1.4) / state.view.scale;
+  ctx.stroke();
 }
 
 function drawInsertPreview() {
@@ -751,14 +1068,22 @@ function onMouseDown(e) {
   if (!state.plan) return;
   const m = getMouse(e);
 
-  // Pan with middle / right / shift+left
-  if (e.button === 1 || e.button === 2 || (e.button === 0 && e.shiftKey)) {
+  // Pan with middle / right / shift+left (but NOT in draw mode — there
+  // shift means "snap the next vertex to 0° / 90° relative to the
+  // previous edge").
+  const drawing = state.mode.startsWith("draw_");
+  if (e.button === 1 || e.button === 2 ||
+      (e.button === 0 && e.shiftKey && !drawing)) {
     state.panning = { x: m.x, y: m.y, tx: state.view.tx, ty: state.view.ty };
     return;
   }
 
-  if (state.mode.startsWith("draw_")) {
-    const w = canvasToWorld(m.x, m.y);
+  if (drawing) {
+    let w = canvasToWorld(m.x, m.y);
+    if (e.shiftKey) {
+      const c = constrainShiftSnap(w.x, w.z);
+      if (c) w = { x: c[0], z: c[1] };
+    }
     // Click on first vertex to close
     if (state.draft.length >= 3) {
       const first = worldToImg(state.draft[0][0], state.draft[0][1]);
@@ -771,8 +1096,20 @@ function onMouseDown(e) {
     return;
   }
 
-  // Insert-vertex mode: click an edge of the selected polygon to inject a vertex.
-  if (state.tool === "insert-vertex" && state.selection) {
+  // Insert-vertex mode: click an edge to inject a vertex.
+  // Post-snap: finds the nearest topology edge so the new vertex is added
+  // to BOTH faces sharing it; pre-snap: works on the selected polygon.
+  if (state.tool === "insert-vertex") {
+    if (state.plan?.topology) {
+      const w = canvasToWorld(m.x, m.y);
+      const hit = nearestTopologyEdge(w.x, w.z);
+      if (hit && hit.distPx < 12) {
+        insertVertexOnTopologyEdge(hit.edgeId, hit.proj);
+        return;
+      }
+      return;
+    }
+    if (!state.selection) return;
     const poly = polygonForKey(state.selection.key);
     if (!poly) return;
     const img = canvasToImg(m.x, m.y);
@@ -785,8 +1122,20 @@ function onMouseDown(e) {
     }
   }
 
-  // Delete-vertex mode: click an existing vertex to remove it (min 3 verts).
-  if (state.tool === "delete-vertex" && state.selection) {
+  // Delete-vertex mode: click an existing vertex to remove it.
+  // Post-snap: deletes the topology vertex (interior or degree-2 only);
+  // pre-snap: spliced out of the selected polygon.
+  if (state.tool === "delete-vertex") {
+    if (state.plan?.topology) {
+      const w = canvasToWorld(m.x, m.y);
+      const vid = topologyVertexAtWorld(w.x, w.z, 0.05);  // 5cm grab radius
+      if (vid >= 0) {
+        deleteTopologyVertex(vid);
+        return;
+      }
+      return;
+    }
+    if (!state.selection) return;
     const poly = polygonForKey(state.selection.key);
     if (!poly || poly.length <= 3) return;
     const vi = nearestVertexIndex(poly, m.x, m.y, 12);
@@ -802,7 +1151,18 @@ function onMouseDown(e) {
   const hit = hitTest(m.x, m.y);
   if (hit) {
     state.selection = { key: hit.key };
-    if (state.tool === "select" && hit.vertexIndex != null) state.drag = hit;
+    if (state.tool === "select" && hit.vertexIndex != null) {
+      state.drag = hit;
+      // Post-snap, this vertex is shared with every other face that owns
+      // the same junction. Resolve to a topology vertex so the drag moves
+      // them all in lockstep.
+      const poly = polygonForKey(hit.key);
+      if (poly) {
+        const v = poly[hit.vertexIndex];
+        const vid = topologyVertexAtWorld(v[0], v[1]);
+        if (vid >= 0) state.drag.topologyVid = vid;
+      }
+    }
     refreshPolygonsList();
     draw();
   } else {
@@ -843,6 +1203,15 @@ function onMouseMove(e) {
   const m = getMouse(e);
   state.hover.world = canvasToWorld(m.x, m.y);
 
+  // While drawing with shift held, snap the hover preview so the next
+  // edge will continue collinearly OR turn at exactly 90° — whichever
+  // direction the cursor is closer to. Drawn-vertex commit reads from
+  // hover.world too, so the click lands exactly on the preview line.
+  if (state.mode.startsWith("draw_") && e.shiftKey) {
+    const c = constrainShiftSnap(state.hover.world.x, state.hover.world.z);
+    if (c) state.hover.world = { x: c[0], z: c[1] };
+  }
+
   if (state.panning) {
     state.view.tx = state.panning.tx + (m.x - state.panning.x);
     state.view.ty = state.panning.ty + (m.y - state.panning.y);
@@ -851,8 +1220,14 @@ function onMouseMove(e) {
 
   if (state.drag) {
     const w = canvasToWorld(m.x, m.y);
-    const poly = polygonForKey(state.drag.key);
-    if (poly) poly[state.drag.vertexIndex] = [w.x, w.z];
+    if (state.drag.topologyVid != null) {
+      // Move the shared topology vertex; all incident face polygons follow.
+      state.plan.topology.vertices[state.drag.topologyVid] = [w.x, w.z];
+      rederiveFacePolygons();
+    } else {
+      const poly = polygonForKey(state.drag.key);
+      if (poly) poly[state.drag.vertexIndex] = [w.x, w.z];
+    }
     draw(); return;
   }
 
@@ -864,10 +1239,16 @@ function onMouseMove(e) {
 async function onMouseUp(e) {
   if (state.panning) { state.panning = null; return; }
   if (state.drag) {
+    const wasTopologyDrag = state.drag.topologyVid != null;
     const key = state.drag.key;
     state.drag = null;
-    // Push the polygon to the server so analyse refreshes.
-    await pushPolygonForKey(key);
+    if (wasTopologyDrag) {
+      // Server replays the move against every face the vertex belongs to,
+      // re-runs the height analysis, and returns a fresh plan.
+      await pushTopologyVertices();
+    } else {
+      await pushPolygonForKey(key);
+    }
   }
 }
 
@@ -893,8 +1274,17 @@ function onKey(e) {
     if (state.draft.length >= 3) commitDraft();
   } else if (e.key === "Escape") {
     cancelDraw();
+  } else if (e.key === "Shift" && state.mode.startsWith("draw_") && state.hover.world) {
+    // Re-snap the preview the instant shift is pressed/released, even
+    // if the mouse hasn't moved since.
+    const c = e.type === "keydown"
+      ? constrainShiftSnap(state.hover.world.x, state.hover.world.z)
+      : null;
+    if (c) state.hover.world = { x: c[0], z: c[1] };
+    draw();
   }
 }
+window.addEventListener("keyup", onKey);
 
 // ─── HIT TEST + POLYGON HELPERS ───────────────────────────────────────────
 function polygonForKey(key) {
@@ -903,6 +1293,10 @@ function polygonForKey(key) {
   if (key.startsWith("region:")) {
     const id = parseInt(key.slice(7), 10);
     return state.plan.regions.find(r => r.id === id)?.polygon;
+  }
+  if (key.startsWith("column:")) {
+    const id = parseInt(key.slice(7), 10);
+    return (state.plan.obstructions || []).find(o => o.id === id)?.polygon;
   }
   return null;
 }
@@ -1037,6 +1431,7 @@ async function loadFromUrlParam() {
     document.getElementById("btn-export").disabled = false;
     if (state.plan.room) {
       markStepDone("room"); unlockStep("main");
+      unlockStep("column");
       document.getElementById("btn-autodetect").disabled = false;
     }
     if (state.plan.room_heatmap)

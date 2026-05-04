@@ -1,7 +1,8 @@
 # Status
 
-Snapshot of the project at the end of the algorithm-sweep session. Read
-this first when picking the work back up.
+**Tagged build: `Good WIP 1 040526` (2026-05-04).** Branch
+`claude/nostalgic-poitras-f0c248`. Read this first when picking the
+work back up.
 
 ## What's shipped (v0.2)
 
@@ -79,63 +80,129 @@ fallback.** Algorithm work is parked here; production focus shifts to
 making the manual-and-auto outputs read as proper architectural
 drawings.
 
-## Next session priorities (in order)
+## What shipped this session (Good WIP 1 040526)
 
-### 1. Shared polygon edges in the topology snap
+### Shared-edge topology
 
-Current `api_snap` (server.py:236) writes each polygon as its own
-ring of vertices. Adjacent polygons end up with edges that *touch*
-but are stored separately; if you drag one polygon's vertex the
-neighbour's edge stays put. That isn't how architectural drawings
-work.
+`api_snap` produces a planar topology — `{vertices, edges, faces}` —
+built at corner resolution from the assignment image. Each shared
+boundary is **one** edge that knows both face IDs; the PDF strokes
+each edge once; vertex drag, vertex insert and vertex delete all
+flow through `topology.vertices`, so a junction shared by two faces
+moves both at the same time.
 
-**Goal:** edges shared between two polygons are stored *once* and
-referenced by both. Editing one moves the other automatically. The
-PDF should render each shared line exactly once.
+`plan["topology"]` lives next to legacy `main` / `regions` (the
+latter kept as a derived view so the renderer didn't have to change).
+`schema_version: 2` carries the migration; pre-v2 `plan.json` loads
+with `topology = null` and the user re-snaps.
 
-**Approach to design:**
+### Topology edit API (post-snap)
 
-- Represent a snapped plan as a planar graph: vertices, edges
-  (vertex-pair), faces (list of edge IDs).
-- Convert the current per-polygon ring representation by:
-  1. Rasterising the assignment image (we already build this in snap).
-  2. Tracing each face's outer boundary.
-  3. Merging duplicate vertices and shared edges across faces.
-- Update the frontend to drag an *edge* (not a vertex chain that
-  happens to overlap with a neighbour) — when an edge moves, both
-  faces it bounds re-render.
-- PDF rendering then iterates edges, not polygons, for the line
-  layer; fills are still per-face.
+| Endpoint | Behaviour |
+|---|---|
+| `POST /snap` | Build / rebuild the topology |
+| `DELETE /topology` | Un-snap; keep current main + regions as plain polygons |
+| `PUT /topology/vertices` | Replace the vertex pool — drag, edge-drag |
+| `POST /topology/edge/{id}/insert_vertex` | Split an edge; both faces gain the vertex |
+| `DELETE /topology/vertex/{id}` | Interior vertex → spliced; degree-2 endpoint with same face pair → edges merge; junction → 400 |
+| `PUT /topology/face/{id}/notes` | Notes per face; mirrored from `PUT /main/notes` and `PUT /region/{id}` (notes) |
 
-This is the load-bearing change for "looks like an architectural
-drawing".
+**Auto-resnap** when topology is present:
 
-### 2. Light segmentation + symbol placement
+- `POST /region` → adds region, snap rebuilds so it has shared edges.
+- `DELETE /region/{id}` → removes region, snap reabsorbs its area.
+- `POST /obstruction` and `DELETE /obstruction/{id}` — same.
+- `PUT /main` with a polygon → clears topology (user is editing
+  underneath), then user re-snaps when ready.
 
-Lights are visible as bright spots in the textured render
-(`ceiling.jpg`). Detect them, classify by shape, drop a CAD-style
-symbol on the PDF aligned to the detection.
+**Polygon-edit guards.** `PUT /region/{id}` with a `polygon` field
+returns 409 once a topology exists — direct polygon edits would
+desync from the topology, so callers must use the topology endpoints
+or un-snap first.
 
-**Approach to design:**
+### Shift-snap (drawing)
 
-- Threshold the textured render's brightness channel (or
-  saturation-low + value-high in HSV) to mask candidate lights.
-- Connected components → for each: bounding rect, oriented bounding
-  rect, eccentricity.
-- Classify: circle if eccentricity < 0.3 OR aspect ratio < 1.5;
-  rectangle otherwise. Keep the orientation of the bounding rect for
-  rectangles.
-- Filter: discard CCs smaller than ~0.05 m² (noise) or larger than
-  ~1 m² (likely not a light).
-- Output schema: `{kind: "circle"|"rectangle", centre: [x, z],
-  size: [w] | [w, h], rotation_deg: float}`.
-- Render in PDF: circles as ⊙ symbol with diameter matching detection,
-  rectangles as outlined frame matching detection.
-- Stretch goal: detect linear diffusers (long thin rectangles),
-  square panels (square rectangles), downlights (small circles).
+While drawing any polygon (room, main, region, column), holding
+**Shift** locks the next vertex to either continue the previous
+edge collinearly or turn at exactly 90° — whichever the cursor is
+closer to. With one vertex placed, Shift snaps to horizontal /
+vertical from that point. Implemented in `app.js`:`constrainShiftSnap`,
+read by both the hover-preview render and the click-commit. Also
+handled on Shift keydown / keyup so the preview snaps the instant
+the modifier is held without needing mouse motion.
 
-The two priorities are independent — you can do them in either order
-or in parallel.
+### Negative space (columns / structural obstructions)
+
+A new `plan["obstructions"]` list of `{id, polygon, label, kind}`
+entries lives alongside `regions`. Drawn after the room outline; the
+new "Add column / structural" step in the workflow. They render with
+a hatched fill on the canvas and in the PDF.
+
+**Snap honours them**: `api_snap` subtracts every obstruction polygon
+from `room_mask` before doing Voronoi assignment, so ceiling regions
+*stop* at the column boundary — the topology gains real boundary
+edges around the column hole. Region stats no longer include
+column-wall LiDAR noise. CRUD endpoints
+(`POST/PUT/DELETE /api/sessions/{id}/obstruction[/{id}]`) auto re-snap
+when a topology exists.
+
+This is the "Option C" middle ground from the design discussion:
+obstructions stored separately (not first-class topology faces with
+multi-ring support), but snap-aware so geometry and stats are clean.
+
+### Source-of-the-work pointers
+
+- `src/ceiling_rcp/topology.py` — build-from-assignment, RDP simplify,
+  DCEL face-ring traversal, `insert_vertex_on_edge`, `delete_vertex`.
+- `src/ceiling_rcp/server.py` — schema migration, `api_snap` (now
+  obstruction-aware), the topology / obstruction CRUD endpoints,
+  legacy-edit 409 guards, PDF that strokes each edge once and hatches
+  obstructions.
+- `src/ceiling_rcp/static/app.js` build 10 — topology vertex drag,
+  shift-snap, column draw flow + hatched canvas render, Un-snap
+  button, auto-resnap response handling.
+- `src/ceiling_rcp/static/index.html` — Un-snap button, "Add column"
+  step.
+
+## Known v1 limits
+
+- **Edge-drag tool** (translate a shared boundary perpendicular to
+  itself, sliding endpoints along their other incident edges) — not
+  built. Vertex drag + insert + delete cover ~95% of editing needs;
+  the architecturally-correct edge translate is a couple-hundred-line
+  follow-up.
+- **Face holes / multi-component faces** — the topology builder picks
+  the largest ring per face and silently drops the rest. Real ceilings
+  are simply connected so this hasn't bitten, but revisit if a snap
+  ever produces a multi-component face.
+- **Junction vertex deletion** — degree-3+ vertices reject with 400.
+  To delete a junction the user has to delete the adjacent face (or
+  un-snap) instead. Could add proper junction-collapse later.
+
+## Next session priorities
+
+The user has a list of feature changes to discuss in planning mode
+before any code lands. The big topics already on the board:
+
+### Light segmentation + symbol placement (priority 2 from the
+prior plan)
+
+Lights are visible as bright spots in `ceiling.jpg`. Both YOLOe26 and
+SAM3.1 nail lights but their vocab doesn't cover the wider RCP family
+(diffusers, smoke detectors, sprinklers, exit signs, fan-coils, …).
+The straw-man stack from the design discussion was:
+
+1. Bright-spot CC + shape-classify lights into strip / panel /
+   downlight (works without ML).
+2. SAM3.1-as-negative-space: invert SAM's ceiling mask, classify
+   each hole by `{bbox, area, eccentricity, height-drop, brightness}`.
+3. Review UI: every detection lands on the canvas, accept / re-classify
+   / delete.
+4. Fine-tune a small classifier on accumulated reviewed crops once
+   ~50 scans worth of truth exists.
+
+That conversation has not yet been picked back up — start the new
+chat with the user's new feature list and re-scope from there.
 
 ## Quick-resume CLI
 

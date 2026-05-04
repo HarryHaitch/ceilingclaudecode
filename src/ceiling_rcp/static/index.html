@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>ceiling-rcp</title>
-  <link rel="stylesheet" href="style.css?v=8">
+  <link rel="stylesheet" href="style.css?v=9">
 </head>
 <body>
   <header>
@@ -47,6 +47,10 @@
             <button id="btn-region" class="step-btn" disabled>Add ceiling region</button>
             <div class="step-status muted">Recesses → +mm above main; bulkheads → −mm below main.</div>
           </li>
+          <li id="step-column" class="locked">
+            <button id="btn-column" class="step-btn" disabled>Add column / structural</button>
+            <div class="step-status muted">Hatched negative space — ceiling regions stop at the boundary.</div>
+          </li>
         </ol>
 
         <button id="btn-autodetect" class="step-btn primary" disabled
@@ -76,10 +80,12 @@
 
         <h2>3. Tidy borders</h2>
         <button id="btn-snap" class="step-btn primary">Snap polygons</button>
+        <button id="btn-unsnap" class="step-btn" hidden>Un-snap (edit polygons)</button>
         <p class="muted hint">
           Pushes / pulls every polygon so they share clean borders inside
           the room — no gaps, no overlap. Main ceiling fills any space
-          regions don't claim.
+          regions don't claim. Once snapped, dragging a vertex on a wall
+          between two regions moves both. Un-snap to redraw freely.
         </p>
 
         <h2>4. Export</h2>
@@ -104,6 +110,6 @@
     </div>
   </main>
 
-  <script src="app.js?v=8"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>
