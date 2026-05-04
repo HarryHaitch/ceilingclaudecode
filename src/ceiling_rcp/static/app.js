@@ -374,8 +374,7 @@ document.getElementById("file-input-flat").addEventListener("change",
   e => uploadFiles(e.target.files));
 
 document.getElementById("btn-room").onclick = () => startDraw("room");
-document.getElementById("btn-main").onclick = () => startDraw("main");
-document.getElementById("btn-region").onclick = () => startDraw("region");
+document.getElementById("btn-interface").onclick = () => startDraw("interface");
 document.getElementById("btn-column").onclick = () => startDraw("column");
 
 document.querySelectorAll(".tool").forEach(b => {
@@ -391,7 +390,7 @@ document.querySelectorAll(".tool").forEach(b => {
   };
 });
 
-document.getElementById("btn-snap").onclick = snapPolygons;
+document.getElementById("btn-define").onclick = defineCeilings;
 document.getElementById("btn-unsnap").onclick = unsnapTopology;
 document.getElementById("btn-pdf").onclick = downloadPdf;
 document.getElementById("btn-export").onclick = exportPlan;
@@ -586,16 +585,15 @@ function setReport(text, cls) {
 
 // ─── DRAW STATE MACHINE ───────────────────────────────────────────────────
 function startDraw(kind) {
-  if (kind === "main" && !state.plan.room) return;
-  if (kind === "region" && !state.plan.main) return;
+  if (kind === "interface" && !state.plan.room) return;
   if (kind === "column" && !state.plan.room) return;
   state.mode = "draw_" + kind;
   state.draft = [];
   state.selection = null;
+  state.draftClosed = false;
   banner.textContent = {
     room: "Drawing ROOM outline — click vertices, click first or press Enter to close. Esc = cancel",
-    main: "Drawing MAIN CEILING — defines height datum (relative = 0)",
-    region: "Drawing CEILING REGION — relative to main ceiling",
+    interface: "Tracing INTERFACE — end on the room outline (chord) or click first vertex to close (ring). Shift = orthogonal lock.",
     column: "Drawing COLUMN — ceiling regions stop at its boundary. Hold Shift to lock 90°.",
   }[kind];
   banner.classList.add("show");
@@ -617,12 +615,17 @@ function cancelDraw() {
 
 async function commitDraft() {
   if (!state.mode.startsWith("draw_")) return;
-  if (state.draft.length < 3) return;
   const kind = state.mode.slice(5);
+  // Interfaces commit at 2+ vertices (an open chord); polygons need 3+.
+  if (kind === "interface") {
+    if (state.draft.length < 2) return;
+  } else if (state.draft.length < 3) return;
   const polygon = state.draft.slice();
+  const closed = !!state.draftClosed;
 
   setStepDrawing(kind, false);
   state.draft = [];
+  state.draftClosed = false;
   banner.classList.remove("show");
   document.querySelector(".tool[data-tool='cancel-draw']").disabled = true;
   state.mode = "select";
@@ -638,44 +641,21 @@ async function commitDraft() {
       state.plan.room_heatmap = d.room_heatmap;
       if (d.room_heatmap) await refreshHeatmap("room", d.room_heatmap);
       markStepDone("room");
-      unlockStep("main");
+      unlockStep("interface");
       unlockStep("column");
+      document.getElementById("btn-define").disabled = false;
     }
-  } else if (kind === "main") {
-    const r = await fetch(`/api/sessions/${state.sessionId}/main`, {
-      method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ polygon }),
-    });
-    if (r.ok) {
-      const d = await r.json();
-      state.plan.main = d.main;
-      await refreshHeatmap("main", d.main);
-      markStepDone("main");
-      unlockStep("region");
-      // Recompute relative_y on existing regions (server already does this)
-      const planR = await fetch(`/api/sessions/${state.sessionId}/plan`);
-      state.plan = await planR.json();
-    }
-  } else if (kind === "region") {
-    const r = await fetch(`/api/sessions/${state.sessionId}/region`, {
+  } else if (kind === "interface") {
+    const r = await fetch(`/api/sessions/${state.sessionId}/interface`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ polygon }),
+      body: JSON.stringify({ polyline: polygon, closed }),
     });
     if (r.ok) {
       const d = await r.json();
-      if (d.snapped && d.plan) {
-        // Server auto re-snapped — replace the whole plan and refresh
-        // every heatmap because face shapes (and therefore stats) all
-        // changed.
-        state.plan = d.plan;
-        await refreshAllHeatmaps();
-      } else {
-        state.plan.regions = state.plan.regions || [];
-        state.plan.regions.push(d.region);
-        await refreshHeatmap("region:" + d.region.id, d.region);
-      }
+      state.plan.interfaces = state.plan.interfaces || [];
+      state.plan.interfaces.push(d.interface);
     } else {
-      setBanner("Add region failed: " + (await r.text()).slice(0, 120), true);
+      setBanner("Add interface failed: " + (await r.text()).slice(0, 120), true);
     }
   } else if (kind === "column") {
     const r = await fetch(`/api/sessions/${state.sessionId}/obstruction`, {
@@ -739,6 +719,11 @@ async function deletePolygon(kind, regionId) {
         state.heatmaps.delete("region:" + regionId);
       }
     }
+  } else if (kind === "interface") {
+    await fetch(`/api/sessions/${state.sessionId}/interface/${regionId}`,
+      { method: "DELETE" });
+    state.plan.interfaces = (state.plan.interfaces || [])
+      .filter(i => i.id !== regionId);
   } else if (kind === "room") {
     await fetch(`/api/sessions/${state.sessionId}/room`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
@@ -748,20 +733,18 @@ async function deletePolygon(kind, regionId) {
     state.heatmaps.delete("room");
     document.getElementById("step-room").classList.remove("done");
     document.getElementById("step-room").classList.add("active");
-    document.getElementById("step-main").classList.add("locked");
-    document.getElementById("btn-main").disabled = true;
+    document.getElementById("step-interface").classList.add("locked");
+    document.getElementById("btn-interface").disabled = true;
+    document.getElementById("btn-define").disabled = true;
   } else if (kind === "main") {
+    // Legacy: delete main face. After cluster D the user re-derives by
+    // clicking Define ceilings again.
     await fetch(`/api/sessions/${state.sessionId}/main`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ polygon: null }),
     });
     state.plan.main = null;
     state.heatmaps.delete("main");
-    document.getElementById("step-main").classList.remove("done");
-    document.getElementById("step-main").classList.add("active");
-    document.getElementById("step-region").classList.add("locked");
-    document.getElementById("btn-region").disabled = true;
-    // Refresh regions to clear relative_y
     for (const r of state.plan.regions || []) r.relative_y = null;
   }
   state.selection = null;
@@ -952,23 +935,48 @@ async function applyMaxVariance() {
   setTimeout(() => banner.classList.remove("show"), 3000);
 }
 
-async function snapPolygons() {
+async function defineCeilings() {
   if (!state.sessionId) return;
   if (!state.plan?.room) { setBanner("Trace the room outline first."); return; }
-  setBanner("Snapping borders…");
-  const r = await fetch(`/api/sessions/${state.sessionId}/snap`, { method: "POST" });
+  setBanner("Polygonising room + interfaces…");
+  const r = await fetch(`/api/sessions/${state.sessionId}/define_ceilings`,
+    { method: "POST" });
   if (!r.ok) {
-    setBanner("Snap failed: " + (await r.text()).slice(0, 120), true);
+    setBanner("Define ceilings failed: " + (await r.text()).slice(0, 200), true);
     return;
   }
   state.plan = await r.json();
   state.heatmaps.clear();
   if (state.plan.main) await refreshHeatmap("main", state.plan.main);
-  for (const reg of state.plan.regions || []) await refreshHeatmap("region:" + reg.id, reg);
+  for (const reg of state.plan.regions || [])
+    await refreshHeatmap("region:" + reg.id, reg);
   refreshPolygonsList();
   draw();
-  setBanner("Snapped — borders shared, no gaps or overlap.");
+  setBanner(
+    `Ceilings defined — ${1 + (state.plan.regions || []).length} face(s).`,
+  );
   setTimeout(() => banner.classList.remove("show"), 2500);
+}
+
+async function pushMainFace(selKey) {
+  if (!state.sessionId) return;
+  const r = await fetch(`/api/sessions/${state.sessionId}/main_face`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key: selKey }),
+  });
+  if (!r.ok) {
+    setBanner("Main-face swap failed: " + (await r.text()).slice(0, 200), true);
+    return;
+  }
+  const d = await r.json();
+  if (d.noop) return;
+  state.plan = d.plan || d;
+  state.heatmaps.clear();
+  if (state.plan.main) await refreshHeatmap("main", state.plan.main);
+  for (const reg of state.plan.regions || [])
+    await refreshHeatmap("region:" + reg.id, reg);
+  refreshPolygonsList();
+  draw();
 }
 
 function setBanner(text, isErr = false) {
@@ -1010,34 +1018,55 @@ async function downloadPdf() {
 
 // ─── POLYGON LIST ─────────────────────────────────────────────────────────
 function refreshPolygonsList() {
-  // Show Un-snap only when a topology exists; show Snap always pre-snap.
   const hasTopology = !!state.plan?.topology;
   document.getElementById("btn-unsnap").hidden = !hasTopology;
-  document.getElementById("btn-snap").textContent =
-    hasTopology ? "Re-snap (rebuild from current polygons)" : "Snap polygons";
+  document.getElementById("btn-define").textContent =
+    hasTopology ? "Re-define ceilings" : "Define ceilings";
 
   const ul = document.getElementById("polygons-list");
   ul.innerHTML = "";
 
-  const addRow = (key, label, color, meta, selKey, currentNotes, allowNotes, allowTintEdit, face) => {
+  const addRow = (key, label, color, meta, selKey, currentNotes, allowNotes, allowTintEdit, face, mainFlag) => {
+    // mainFlag is one of {undefined, "main", "region", "off"}:
+    //  "main"   → render a checked Main radio (this row IS the datum)
+    //  "region" → render an unchecked Main radio (clicking promotes it)
+    //  "off"    → no radio (room outline, columns, interfaces)
     const li = document.createElement("li");
     li.className = "poly-row" + (state.selection?.key === selKey ? " active" : "");
     const head = document.createElement("div");
     head.className = "poly-head";
+    const radioHtml = mainFlag === "main"
+      ? `<input type="radio" class="main-radio" name="main-face" checked title="Datum face (relative_y = 0)">`
+      : mainFlag === "region"
+        ? `<input type="radio" class="main-radio" name="main-face" title="Make this the datum face">`
+        : "";
     if (allowTintEdit) {
       head.innerHTML =
+        radioHtml +
         `<input type="color" class="swatch swatch-input" value="${color}" title="Change tint">` +
         `<div class="label">${label}</div>` +
         `<div class="meta">${meta}</div>` +
         `<button class="del-btn" title="Delete">×</button>`;
     } else {
       head.innerHTML =
+        radioHtml +
         `<div class="swatch" style="background:${color}"></div>` +
         `<div class="label">${label}</div>` +
         `<div class="meta">${meta}</div>` +
         `<button class="del-btn" title="Delete">×</button>`;
     }
     li.appendChild(head);
+
+    if (mainFlag === "region") {
+      const radio = head.querySelector(".main-radio");
+      if (radio) {
+        radio.onclick = (e) => e.stopPropagation();
+        radio.onchange = () => pushMainFace(selKey);
+      }
+    } else if (mainFlag === "main") {
+      const radio = head.querySelector(".main-radio");
+      if (radio) radio.onclick = (e) => e.stopPropagation();
+    }
 
     if (allowTintEdit) {
       const sw = head.querySelector(".swatch-input");
@@ -1096,28 +1125,39 @@ function refreshPolygonsList() {
 
   if (state.plan.room) {
     addRow("room", "Room outline", "#ffe082",
-      `${state.plan.room.length} verts`, "room", null, false, false, null);
+      `${state.plan.room.length} verts`, "room", null, false, false, null, "off");
+  }
+  for (const iface of state.plan.interfaces || []) {
+    const closedTxt = iface.closed ? "ring" : "chord";
+    addRow("interface:" + iface.id, `Interface ${iface.id + 1}`,
+      "#00e5ff",
+      `${iface.polyline.length} verts • ${closedTxt}`,
+      "interface:" + iface.id, null, false, false, null, "off");
   }
   if (state.plan.main) {
-    const s = state.plan.main.stats;
+    const s = state.plan.main.stats || {};
+    const stdTxt = (s.std_y !== undefined && s.std_y !== null)
+      ? formatLength(s.std_y) : "—";
     addRow("main", state.plan.main.label || "Main Ceiling (1)",
       state.plan.main.tint || "#80cbc4",
-      `${formatHeightDelta(0)}  spread ${formatLength(s.std_y)}`,
-      "main", state.plan.main.notes, true, true, state.plan.main);
+      `${formatHeightDelta(0)}  spread ${stdTxt}`,
+      "main", state.plan.main.notes, true, true, state.plan.main, "main");
   }
   for (const r of state.plan.regions || []) {
-    const s = r.stats;
+    const s = r.stats || {};
     const rel = r.relative_y;
     const relTxt = rel === null || rel === undefined ? "—" : formatHeightDelta(rel);
+    const stdTxt = (s.std_y !== undefined && s.std_y !== null)
+      ? formatLength(s.std_y) : "—";
     addRow("region:" + r.id, r.label || `Ceiling Region (${r.id + 2})`,
       r.tint || "#ff7043",
-      `${relTxt}  spread ${formatLength(s.std_y)}`,
-      "region:" + r.id, r.notes, true, true, r);
+      `${relTxt}  spread ${stdTxt}`,
+      "region:" + r.id, r.notes, true, true, r, "region");
   }
   for (const o of state.plan.obstructions || []) {
     addRow("column:" + o.id, o.label || `Column (${o.id + 1})`,
       "#ffffff", `${o.polygon.length} verts`,
-      "column:" + o.id, null, false, false, null);
+      "column:" + o.id, null, false, false, null, "off");
   }
   updateSelectionInfo();
 }
@@ -1434,6 +1474,11 @@ function draw() {
   for (const o of state.plan.obstructions || []) {
     drawObstruction(o);
   }
+  // Interface polylines / rings (cyan, drawn above region fills so the
+  // user can see what they've traced even after Define ceilings).
+  for (const iface of state.plan.interfaces || []) {
+    drawInterface(iface);
+  }
   // Hover preview for insert-vertex
   if (state.tool === "insert-vertex" && state.selection && state.hover.world) {
     drawInsertPreview();
@@ -1578,6 +1623,39 @@ function drawInsertPreview() {
   ctx.fill();
 }
 
+function drawInterface(iface) {
+  const pts = iface.polyline || [];
+  if (pts.length < 2) return;
+  const selKey = "interface:" + iface.id;
+  const selected = state.selection?.key === selKey;
+  ctx.beginPath();
+  for (let i = 0; i < pts.length; i++) {
+    const p = worldToImg(pts[i][0], pts[i][1]);
+    if (i === 0) ctx.moveTo(p.u, p.v); else ctx.lineTo(p.u, p.v);
+  }
+  if (iface.closed) {
+    const p0 = worldToImg(pts[0][0], pts[0][1]);
+    ctx.lineTo(p0.u, p0.v);
+  }
+  ctx.strokeStyle = selected ? "#ffffff" : "#00e5ff";
+  ctx.lineWidth = (selected ? 2.4 : 1.8) / state.view.scale;
+  ctx.setLineDash([]);
+  ctx.stroke();
+
+  // Vertex dots so the user can grab them post-trace.
+  const r = 4 / state.view.scale;
+  for (let i = 0; i < pts.length; i++) {
+    const v = worldToImg(pts[i][0], pts[i][1]);
+    ctx.beginPath();
+    ctx.arc(v.u, v.v, r, 0, Math.PI * 2);
+    ctx.fillStyle = "#00e5ff";
+    ctx.fill();
+    ctx.strokeStyle = "#003a4a";
+    ctx.lineWidth = 1 / state.view.scale;
+    ctx.stroke();
+  }
+}
+
 function drawDraft() {
   const poly = state.draft;
   ctx.beginPath();
@@ -1635,12 +1713,18 @@ function onMouseDown(e) {
       const c = constrainShiftSnap(w.x, w.z);
       if (c) w = { x: c[0], z: c[1] };
     }
-    // Click on first vertex to close
+    const isIface = state.mode === "draw_interface";
+    // Click on first vertex to close (a ring, for interface; a polygon
+    // for room/column). Min vertices: 3 for both.
     if (state.draft.length >= 3) {
       const first = worldToImg(state.draft[0][0], state.draft[0][1]);
       const cur = worldToImg(w.x, w.z);
       const dpx = Math.hypot(first.u - cur.u, first.v - cur.v) * state.view.scale;
-      if (dpx < 12) { commitDraft(); return; }
+      if (dpx < 12) {
+        if (isIface) state.draftClosed = true;
+        commitDraft();
+        return;
+      }
     }
     state.draft.push([w.x, w.z]);
     draw();
@@ -1848,7 +1932,10 @@ function onWheel(e) {
 
 function onKey(e) {
   if (e.key === "Enter" && state.mode.startsWith("draw_")) {
-    if (state.draft.length >= 3) commitDraft();
+    // Interfaces commit at 2+ vertices (open chord); polygons need 3+.
+    const isIface = state.mode === "draw_interface";
+    const min = isIface ? 2 : 3;
+    if (state.draft.length >= min) commitDraft();
   } else if (e.key === "Escape") {
     cancelDraw();
   } else if ((e.key === "Delete" || e.key === "Backspace") && e.type === "keydown") {
@@ -2124,13 +2211,14 @@ async function loadFromUrlParam() {
     applyUnitsToggleUI();
     syncProjectPanel(state.plan.project);
     if (state.plan.room) {
-      markStepDone("room"); unlockStep("main");
+      markStepDone("room");
+      unlockStep("interface");
       unlockStep("column");
+      document.getElementById("btn-define").disabled = false;
     }
     if (state.plan.room_heatmap)
       await refreshHeatmap("room", state.plan.room_heatmap);
     if (state.plan.main) {
-      markStepDone("main"); unlockStep("region");
       await refreshHeatmap("main", state.plan.main);
     }
     for (const r of state.plan.regions || [])

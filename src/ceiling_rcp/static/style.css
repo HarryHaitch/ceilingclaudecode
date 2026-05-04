@@ -240,6 +240,14 @@ ul#polygons-list { list-style: none; padding: 0; margin: 0; }
 }
 .poly-spark .hist-spark { display: block; }
 
+.poly-row .main-radio {
+  margin: 0 4px 0 0;
+  accent-color: var(--accent-hot);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.poly-row .main-radio:checked { filter: drop-shadow(0 0 2px var(--accent-hot)); }
+
 #selection-info {
   font-size: 12px; line-height: 1.5;
   padding: 6px 8px;

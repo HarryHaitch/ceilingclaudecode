@@ -77,7 +77,7 @@ def _session_dir(session_id: str) -> Path:
 # Schema version for plan.json. Bump when the on-disk shape changes; add a
 # migration step in _migrate_plan. Files written by older versions are
 # upgraded transparently on first read.
-PLAN_SCHEMA_VERSION = 4
+PLAN_SCHEMA_VERSION = 5
 
 
 def _migrate_plan(plan: dict[str, Any]) -> dict[str, Any]:
@@ -102,9 +102,18 @@ def _migrate_plan(plan: dict[str, Any]) -> dict[str, Any]:
         # missing histograms (renders a "no data" sparkline) so an
         # unedited migrated plan is still usable.
         pass
+    if v < 5:
+        # v4 → v5: introduces plan["interfaces"] (user-traced ceiling-zone
+        # boundary polylines / rings) and plan["main_face_id"] (which
+        # face is the height datum, default 0). Both have safe defaults
+        # so old plans keep working.
+        plan.setdefault("interfaces", [])
+        plan.setdefault("main_face_id", 0)
     plan["schema_version"] = PLAN_SCHEMA_VERSION
     # Field-level defaults that don't warrant a schema bump.
     plan.setdefault("obstructions", [])
+    plan.setdefault("interfaces", [])
+    plan.setdefault("main_face_id", 0)
     proj = plan.get("project") or {}
     defaults = {
         "name": "", "address": "", "client": "", "company": "",
@@ -383,6 +392,8 @@ def process_session(
         "main": None,
         "regions": [],
         "obstructions": [],
+        "interfaces": [],
+        "main_face_id": 0,
         "topology": None,
         "units": DEFAULT_UNITS,
         "scan_settings": {
@@ -881,6 +892,230 @@ async def api_delete_obstruction(session_id: str, obstruction_id: int) -> dict:
         await api_snap(session_id)
         return {"ok": True, "snapped": True, "plan": _load_plan(session_id)}
     return {"ok": True}
+
+
+# ─── INTERFACES (ceiling-zone boundaries) ─────────────────────────────────────
+#
+# An interface is a user-traced polyline that bounds two adjacent ceilings.
+# Open polylines are *chords* — both endpoints land on the room outline or
+# another interface, and they subdivide whichever face contains them.
+# Closed polylines are *island rings* — they sit inside another face and
+# create a new face wholly contained within. ``define_ceilings`` polygonises
+# room outline + interfaces (subtracting columns) and rebuilds main +
+# regions + topology from the result.
+#
+# Schema: ``plan["interfaces"] = [{id, polyline: [[x, z], ...], closed: bool}]``.
+
+
+@app.post("/api/sessions/{session_id}/interface")
+async def api_add_interface(session_id: str, payload: dict = Body(...)) -> dict:
+    plan = _load_plan(session_id)
+    poly = payload.get("polyline") or []
+    if len(poly) < 2:
+        raise HTTPException(400, "interface polyline must have at least 2 vertices")
+    closed = bool(payload.get("closed", False))
+    if closed and len(poly) < 3:
+        raise HTTPException(400, "closed interface (ring) must have at least 3 vertices")
+    iid = (max((i["id"] for i in plan.get("interfaces", [])), default=-1)) + 1
+    iface = {
+        "id": iid,
+        "polyline": [[float(p[0]), float(p[1])] for p in poly],
+        "closed": closed,
+    }
+    plan.setdefault("interfaces", []).append(iface)
+    _save_plan(session_id, plan)
+    return {"ok": True, "interface": iface}
+
+
+@app.put("/api/sessions/{session_id}/interface/{interface_id}")
+async def api_update_interface(
+    session_id: str, interface_id: int, payload: dict = Body(...),
+) -> dict:
+    plan = _load_plan(session_id)
+    iface = next(
+        (i for i in plan.get("interfaces", []) if i["id"] == interface_id),
+        None,
+    )
+    if iface is None:
+        raise HTTPException(404, f"unknown interface {interface_id}")
+    if "polyline" in payload:
+        poly = payload["polyline"] or []
+        if len(poly) < 2:
+            raise HTTPException(400, "interface polyline must have at least 2 vertices")
+        iface["polyline"] = [[float(p[0]), float(p[1])] for p in poly]
+    if "closed" in payload:
+        iface["closed"] = bool(payload["closed"])
+    if iface.get("closed") and len(iface["polyline"]) < 3:
+        raise HTTPException(400, "closed interface needs at least 3 vertices")
+    _save_plan(session_id, plan)
+    return {"ok": True, "interface": iface}
+
+
+@app.delete("/api/sessions/{session_id}/interface/{interface_id}")
+async def api_delete_interface(session_id: str, interface_id: int) -> dict:
+    plan = _load_plan(session_id)
+    before = len(plan.get("interfaces", []))
+    plan["interfaces"] = [
+        i for i in plan.get("interfaces", []) if i["id"] != interface_id
+    ]
+    if len(plan["interfaces"]) == before:
+        raise HTTPException(404, f"unknown interface {interface_id}")
+    _save_plan(session_id, plan)
+    return {"ok": True}
+
+
+@app.post("/api/sessions/{session_id}/define_ceilings")
+async def api_define_ceilings(session_id: str) -> dict:
+    """Polygonise the room outline + every interface into a tiling of N
+    faces, populate ``plan.main`` (largest face by default) +
+    ``plan.regions`` (the rest) with auto-tinted polygons, then run the
+    snap pipeline so the topology / heatmaps / histograms are built
+    against the new polygons.
+
+    The user picks which face is the ceiling datum afterwards via
+    ``PUT /main_face`` — the largest face is just a sensible default."""
+    from shapely.geometry import LineString, Polygon
+    from shapely.ops import unary_union, polygonize
+
+    plan = _load_plan(session_id)
+    room_pts = plan.get("room")
+    if not room_pts or len(room_pts) < 3:
+        raise HTTPException(400, "room outline required before defining ceilings")
+
+    # Build the linework: room ring (closed) + each interface (open chord
+    # or closed ring). Numerical drift between user clicks and the room
+    # outline is small but nonzero; unary_union on the merged geometry
+    # handles common-vertex matching automatically.
+    lines: list[LineString] = []
+    room_ring = list(room_pts) + [room_pts[0]]
+    lines.append(LineString(room_ring))
+    for iface in plan.get("interfaces", []):
+        pts = iface.get("polyline") or []
+        if len(pts) < 2:
+            continue
+        if iface.get("closed"):
+            if len(pts) < 3:
+                continue
+            lines.append(LineString(list(pts) + [pts[0]]))
+        else:
+            lines.append(LineString(pts))
+
+    merged = unary_union(lines)
+    polys = list(polygonize(merged))
+
+    # Keep only polygons of meaningful area whose representative point
+    # falls inside the room (polygonize on degenerate linework can leak
+    # a few sliver polygons).
+    room_poly = Polygon(room_pts)
+    min_face_area = 0.05  # 0.05 m² = a 22 cm × 22 cm patch
+    filtered = [
+        p for p in polys
+        if p.area >= min_face_area and room_poly.contains(p.representative_point())
+    ]
+    if not filtered:
+        raise HTTPException(
+            409,
+            "no faces produced — chords must terminate on the room outline "
+            "or another interface, and rings must close back to their start",
+        )
+
+    filtered.sort(key=lambda p: p.area, reverse=True)
+
+    def _coords(p: Polygon) -> list[list[float]]:
+        return [[float(x), float(z)] for x, z in list(p.exterior.coords)[:-1]]
+
+    # Seed the legacy main / regions views with the polygonisation, then
+    # run the snap pipeline — it builds the planar topology + per-face
+    # height analysis from these polygons. (The Voronoi step is a no-op
+    # on already-tiling polygons, but the topology + analysis it
+    # performs after is what we want.)
+    main_pts = _coords(filtered[0])
+    plan["main"] = {
+        "polygon": main_pts,
+        "label": "Main Ceiling (1)",
+        "tint": MAIN_TINT,
+        "notes": (plan.get("main") or {}).get("notes", ""),
+    }
+    plan["regions"] = []
+    for i, p in enumerate(filtered[1:]):
+        plan["regions"].append({
+            "id": i,
+            "label": f"Ceiling Region ({i + 2})",
+            "polygon": _coords(p),
+            "tint": _region_tint(i),
+            "notes": "",
+        })
+    plan["main_face_id"] = 0
+    plan["topology"] = None
+    plan["snapped"] = False
+    _save_plan(session_id, plan)
+
+    # Hand off to the snap pipeline. It re-derives plan.main + plan.regions
+    # from the topology, runs height analysis, and saves.
+    return await api_snap(session_id)
+
+
+@app.put("/api/sessions/{session_id}/main_face")
+async def api_swap_main_face(session_id: str, payload: dict = Body(...)) -> dict:
+    """Pick which face is the ceiling-height datum.
+
+    Body: ``{"key": "main"}`` (no-op) or ``{"key": "region:<id>"}``.
+    The named face becomes the new main; the previous main becomes a
+    region keeping the freed region id. If the session is snapped, the
+    topology is rebuilt so face id 0 is the new main."""
+    plan = _load_plan(session_id)
+    key = str(payload.get("key", ""))
+    if key == "main":
+        return {"ok": True, "noop": True, "plan": plan}
+    if not key.startswith("region:"):
+        raise HTTPException(400, "key must be 'main' or 'region:<id>'")
+    try:
+        rid = int(key.split(":", 1)[1])
+    except (ValueError, IndexError):
+        raise HTTPException(400, f"bad region key {key!r}")
+
+    target = next((r for r in plan.get("regions", []) if r["id"] == rid), None)
+    if target is None:
+        raise HTTPException(404, f"unknown region {rid}")
+    cur_main = plan.get("main")
+    if cur_main is None:
+        raise HTTPException(409, "no main ceiling set yet")
+
+    # Swap the underlying polygons. Re-snap (if topology exists) will
+    # rebuild every derived view from the new main-vs-region split.
+    target_poly = [list(p) for p in target["polygon"]]
+    target_notes = target.get("notes", "")
+    old_main_poly = [list(p) for p in cur_main["polygon"]]
+    old_main_notes = cur_main.get("notes", "")
+    old_main_label = cur_main.get("label", "Main Ceiling (1)")
+
+    plan["main"] = {
+        "polygon": target_poly,
+        "label": "Main Ceiling (1)",
+        "tint": MAIN_TINT,
+        "notes": target_notes,
+    }
+    plan["regions"] = [r for r in plan["regions"] if r["id"] != rid]
+    plan["regions"].append({
+        "id": rid,
+        "label": old_main_label if old_main_label != "Main Ceiling (1)"
+                 else f"Ceiling Region ({rid + 2})",
+        "polygon": old_main_poly,
+        "tint": _region_tint(rid),
+        "notes": old_main_notes,
+    })
+    plan["regions"].sort(key=lambda r: r["id"])
+    plan["main_face_id"] = 0  # always 0 after re-snap
+
+    if plan.get("topology"):
+        plan["topology"] = None
+        plan["snapped"] = False
+        _save_plan(session_id, plan)
+        return await api_snap(session_id)
+
+    _recompute_relatives(plan)
+    _save_plan(session_id, plan)
+    return {"ok": True, "plan": _load_plan(session_id)}
 
 
 # ─── MAIN CEILING POLYGON ─────────────────────────────────────────────────────

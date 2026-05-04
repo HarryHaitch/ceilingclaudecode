@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>ceiling-rcp</title>
-  <link rel="stylesheet" href="style.css?v=15">
+  <link rel="stylesheet" href="style.css?v=17">
 </head>
 <body>
   <header>
@@ -108,19 +108,15 @@
           </p>
         </div>
 
-        <h2>3. Trace polygons</h2>
+        <h2>3. Trace ceiling zones</h2>
         <ol class="workflow">
           <li id="step-room"  class="active">
             <button id="btn-room"  class="step-btn">Trace room outline</button>
             <div class="step-status muted">Click vertices, then click the first one (or press Enter) to close.</div>
           </li>
-          <li id="step-main"  class="locked">
-            <button id="btn-main" class="step-btn" disabled>Trace main ceiling</button>
-            <div class="step-status muted">Defines the height datum — its average height becomes 0 mm.</div>
-          </li>
-          <li id="step-region" class="locked">
-            <button id="btn-region" class="step-btn" disabled>Add ceiling region</button>
-            <div class="step-status muted">Recesses → +mm above main; bulkheads → −mm below main.</div>
+          <li id="step-interface" class="locked">
+            <button id="btn-interface" class="step-btn" disabled>Trace interface</button>
+            <div class="step-status muted">Trace the line between two ceilings. End on the room outline (chord), or click the first vertex to close (island ring).</div>
           </li>
           <li id="step-column" class="locked">
             <button id="btn-column" class="step-btn" disabled>Add column / structural</button>
@@ -129,12 +125,11 @@
         </ol>
 
         <p class="help-blurb">
-          <b>What the colour shading means:</b> inside each polygon, every
-          pixel is tinted by how far its scanned height sits above (lighter)
-          or below (darker) that polygon's own average. A polygon that
-          looks evenly tinted is a flat plane; obvious light/dark patches
-          inside one polygon mean it has clipped a bulkhead or recess —
-          shrink the polygon or split it.
+          <b>How tracing works:</b> trace each visible ceiling boundary
+          once as an interface — adjacent ceilings share that edge.
+          Click <b>Define ceilings</b> below to turn the interfaces into
+          tinted faces. Then pick which face is the height datum (Main)
+          in the Regions panel.
         </p>
 
         <h3>Tools</h3>
@@ -145,14 +140,13 @@
         </div>
         <p class="muted hint" id="tool-hint">Click a vertex to drag. Press <b>Delete</b> over a vertex to remove it.</p>
 
-        <h2>4. Tidy borders</h2>
-        <button id="btn-snap" class="step-btn primary">Snap polygons</button>
-        <button id="btn-unsnap" class="step-btn" hidden>Un-snap (edit polygons)</button>
+        <h2>4. Define ceilings</h2>
+        <button id="btn-define" class="step-btn primary" disabled>Define ceilings</button>
+        <button id="btn-unsnap" class="step-btn" hidden>Un-define (edit interfaces)</button>
         <p class="muted hint">
-          Pushes / pulls every polygon so they share clean borders inside
-          the room — no gaps, no overlap. Main ceiling fills any space
-          regions don't claim. Once snapped, dragging a vertex on a wall
-          between two regions moves both. Un-snap to redraw freely.
+          Polygonises the room outline + every interface into N tiled
+          ceiling faces. The largest is the default Main; pick another
+          via the Regions panel's <b>Main</b> radio if needed.
         </p>
 
         <h2>5. Export</h2>
@@ -181,6 +175,6 @@
     </aside>
   </main>
 
-  <script src="app.js?v=16"></script>
+  <script src="app.js?v=18"></script>
 </body>
 </html>
