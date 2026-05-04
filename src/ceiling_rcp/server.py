@@ -51,7 +51,7 @@ from .analyse import (
 )
 from .mesh import inspect_folder, load_mesh, ceiling_face_mask, downward_face_mask
 from .planes import PlanGrid, make_grid
-from .polylabel import polylabel, longest_edge_angle_deg
+from .polylabel import polylabel
 from .raster import render_textured_topdown
 from .units import (
     DEFAULT_UNITS,
@@ -1737,7 +1737,7 @@ async def api_pdf(session_id: str) -> Response:
     fig = plt.figure(figsize=(A1_W_IN, A1_H_IN))
     gs = fig.add_gridspec(
         nrows=2, ncols=2,
-        width_ratios=[3.2, 1.0],   # plan : title block
+        width_ratios=[3.2, 0.7],   # plan : title block (30 % narrower than v1)
         height_ratios=[5.0, 1.0],  # plan : legend
         left=0.02, right=0.98, top=0.98, bottom=0.02,
         hspace=0.03, wspace=0.03,
@@ -1812,12 +1812,15 @@ async def api_pdf(session_id: str) -> Response:
         except Exception:
             cx = sum(p[0] for p in pts) / len(pts)
             cz = sum(p[1] for p in pts) / len(pts)
-        angle = longest_edge_angle_deg(outer_ring)
+        # Architectural convention: ceiling labels read horizontally,
+        # matching the title block. Earlier versions rotated to the
+        # polygon's longest edge — that read like CAD section markers
+        # rather than RCP labels.
         text = f"{label}\n{rel_text}"
         if notes:
             text += f"\n{notes}"
         ax.text(cx, cz, text,
-                ha="center", va="center", rotation=angle,
+                ha="center", va="center", rotation=0,
                 fontsize=8, fontweight="bold",
                 bbox=dict(boxstyle="round,pad=0.25",
                           facecolor="white", edgecolor=edge_color, linewidth=0.6))
@@ -2032,20 +2035,50 @@ def _draw_title_block(title_ax, *, project: dict, session_id: str,
     title_ax.add_patch(Rectangle((0, 0), 1, 1, fill=False,
                                   edgecolor="#222", linewidth=1.2))
 
-    # Top: ortho thumbnail.
+    # Top: ortho thumbnail. The box is fixed; the image is letter-boxed
+    # inside it so its natural aspect is preserved (no stretching).
     THUMB_TOP = 0.98
     THUMB_BOTTOM = 0.62
+    THUMB_LEFT = 0.04
+    THUMB_RIGHT = 0.96
     title_ax.add_patch(Rectangle(
-        (0.04, THUMB_BOTTOM), 0.92, THUMB_TOP - THUMB_BOTTOM,
+        (THUMB_LEFT, THUMB_BOTTOM),
+        THUMB_RIGHT - THUMB_LEFT, THUMB_TOP - THUMB_BOTTOM,
         fill=False, edgecolor="#888", linewidth=0.5,
     ))
     try:
         if ortho_path.exists():
             import matplotlib.image as mpimg
             img = mpimg.imread(str(ortho_path))
+            ih, iw = img.shape[:2]
+            # Convert the box from axis-units to inches via the title_ax's
+            # figure-relative position so the aspect calc is robust to
+            # any gridspec width/height changes upstream.
+            fig = title_ax.figure
+            fig_w_in, fig_h_in = fig.get_size_inches()
+            ax_bbox = title_ax.get_position()
+            strip_w_in = ax_bbox.width * fig_w_in
+            strip_h_in = ax_bbox.height * fig_h_in
+            box_w_in = strip_w_in * (THUMB_RIGHT - THUMB_LEFT)
+            box_h_in = strip_h_in * (THUMB_TOP - THUMB_BOTTOM)
+            img_aspect = iw / ih           # >1 = wide, <1 = tall
+            box_aspect = box_w_in / box_h_in
+            if img_aspect > box_aspect:
+                # Image wider than box — fit by width, letterbox top/bottom.
+                disp_w_ax = THUMB_RIGHT - THUMB_LEFT
+                disp_h_in = box_w_in / img_aspect
+                disp_h_ax = disp_h_in / strip_h_in
+            else:
+                # Image taller than box — fit by height, letterbox sides.
+                disp_h_ax = THUMB_TOP - THUMB_BOTTOM
+                disp_w_in = box_h_in * img_aspect
+                disp_w_ax = disp_w_in / strip_w_in
+            cx = (THUMB_LEFT + THUMB_RIGHT) / 2
+            cy = (THUMB_BOTTOM + THUMB_TOP) / 2
             title_ax.imshow(
                 img,
-                extent=(0.04, 0.96, THUMB_BOTTOM, THUMB_TOP),
+                extent=(cx - disp_w_ax / 2, cx + disp_w_ax / 2,
+                        cy - disp_h_ax / 2, cy + disp_h_ax / 2),
                 aspect="auto", zorder=1,
             )
     except Exception:
@@ -2075,7 +2108,7 @@ def _draw_title_block(title_ax, *, project: dict, session_id: str,
                        fontsize=7, fontweight="bold", color="#888")
         title_ax.text(0.06, y_bot + 0.008, v,
                        ha="left", va="bottom",
-                       fontsize=10, color="#222")
+                       fontsize=14, color="#222")
 
     # Drawing register table.
     reg_top = field_top - len(fields) * field_h - 0.02

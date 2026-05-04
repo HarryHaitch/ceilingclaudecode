@@ -41,7 +41,7 @@
           </div>
         </div>
 
-        <details id="project-panel" class="project-panel">
+        <details id="project-panel" class="project-panel" open>
           <summary><h2 style="display:inline">Project info</h2></summary>
           <div class="project-fields">
             <label>Project name<input type="text" data-project="name"></label>
@@ -52,14 +52,21 @@
             <div class="north-row">
               <div>
                 <label class="muted" style="display:block;font-size:11px">North direction</label>
-                <svg id="north-picker" width="80" height="80" viewBox="-1.2 -1.2 2.4 2.4">
-                  <circle cx="0" cy="0" r="1" fill="none" stroke="#888" stroke-width="0.04"/>
-                  <line x1="0" y1="-1" x2="0" y2="-0.85" stroke="#666" stroke-width="0.05"/>
-                  <text x="0" y="-1.05" text-anchor="middle" font-size="0.18" fill="#888">N</text>
+                <svg id="north-picker" width="80" height="80" viewBox="-1.2 -1.2 2.4 2.4"
+                     style="cursor:grab">
+                  <circle cx="0" cy="0" r="1" fill="none" stroke="#aaa" stroke-width="0.04"/>
+                  <line x1="0" y1="-1" x2="0" y2="-0.85" stroke="#aaa" stroke-width="0.05"/>
+                  <text x="0" y="-1.05" text-anchor="middle" font-size="0.18" fill="#aaa">N</text>
                   <g id="north-needle" transform="rotate(0)">
-                    <polygon points="0,-0.9 0.16,0.5 -0.16,0.5" fill="#222"/>
+                    <polygon points="0,-0.9 0.16,0.5 -0.16,0.5"
+                             fill="#e7e9ec" stroke="#444" stroke-width="0.02"/>
+                    <circle cx="0" cy="-0.9" r="0.14" fill="#ef5350"
+                            stroke="#7a1f1d" stroke-width="0.02"/>
                   </g>
                 </svg>
+                <div class="muted" style="font-size:10px;text-align:center;margin-top:2px;width:80px">
+                  Drag to set North
+                </div>
               </div>
               <div style="flex:1">
                 <label>Heading (deg)
@@ -154,12 +161,6 @@
           Coloured masks, relative-height tags on each polygon, and
           dimensioned room outline.
         </p>
-
-        <h3>Polygons</h3>
-        <ul id="polygons-list"></ul>
-
-        <h3>Selected</h3>
-        <div id="selection-info" class="muted">Nothing selected</div>
       </section>
     </aside>
 
@@ -168,6 +169,16 @@
       <div id="readout"></div>
       <div id="banner"></div>
     </div>
+
+    <aside id="right-sidebar">
+      <section id="right-panel" hidden>
+        <h3>Regions</h3>
+        <ul id="polygons-list"></ul>
+
+        <h3>Selected</h3>
+        <div id="selection-info" class="muted">Nothing selected</div>
+      </section>
+    </aside>
   </main>
 
   <script src="app.js?v=14"></script>

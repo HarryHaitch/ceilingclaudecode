@@ -401,7 +401,8 @@ document.getElementById("input-print-north").addEventListener("change", (e) => {
 });
 {
   const svg = document.getElementById("north-picker");
-  svg.addEventListener("click", (e) => {
+  let dragging = false;
+  function applyAngleFromEvent(e) {
     const rect = svg.getBoundingClientRect();
     const cx = rect.left + rect.width / 2;
     const cy = rect.top + rect.height / 2;
@@ -414,6 +415,21 @@ document.getElementById("input-print-north").addEventListener("change", (e) => {
     document.getElementById("input-north-deg").value = angle;
     setNorthAngleUI(angle);
     scheduleProjectPush("north_deg", angle);
+  }
+  svg.addEventListener("mousedown", (e) => {
+    dragging = true;
+    svg.style.cursor = "grabbing";
+    applyAngleFromEvent(e);
+    e.preventDefault();
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    applyAngleFromEvent(e);
+  });
+  window.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false;
+    svg.style.cursor = "grab";
   });
 }
 document.getElementById("btn-add-register-row").onclick = () => {
@@ -524,6 +540,7 @@ async function runProcess() {
   state.plan = await r.json();
   await loadCeilingImage();
   document.getElementById("workflow").hidden = false;
+  document.getElementById("right-panel").hidden = false;
   document.getElementById("btn-export").disabled = false;
   fitView();
   refreshPolygonsList();
@@ -1889,6 +1906,7 @@ async function loadFromUrlParam() {
     document.getElementById("session-label").textContent = `session ${sid}`;
     document.getElementById("upload-section").hidden = true;
     document.getElementById("workflow").hidden = false;
+    document.getElementById("right-panel").hidden = false;
     document.getElementById("btn-export").disabled = false;
     const sv = state.plan?.scan_settings?.max_ceiling_variance_m;
     if (typeof sv === "number" && Number.isFinite(sv)) {
