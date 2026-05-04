@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>ceiling-rcp</title>
-  <link rel="stylesheet" href="style.css?v=9">
+  <link rel="stylesheet" href="style.css?v=13">
 </head>
 <body>
   <header>
@@ -33,7 +33,75 @@
       </section>
 
       <section id="workflow" hidden>
-        <h2>2. Trace polygons</h2>
+        <div class="units-toggle">
+          <span class="muted">Units:</span>
+          <div class="seg-buttons">
+            <button data-units="metric"   class="seg-btn active">mm / m</button>
+            <button data-units="imperial" class="seg-btn">ft-in</button>
+          </div>
+        </div>
+
+        <details id="project-panel" class="project-panel">
+          <summary><h2 style="display:inline">Project info</h2></summary>
+          <div class="project-fields">
+            <label>Project name<input type="text" data-project="name"></label>
+            <label>Address<input type="text" data-project="address"></label>
+            <label>Client<input type="text" data-project="client"></label>
+            <label>Company<input type="text" data-project="company"></label>
+            <label>Drawing number<input type="text" data-project="drawing_number"></label>
+            <div class="north-row">
+              <div>
+                <label class="muted" style="display:block;font-size:11px">North direction</label>
+                <svg id="north-picker" width="80" height="80" viewBox="-1.2 -1.2 2.4 2.4">
+                  <circle cx="0" cy="0" r="1" fill="none" stroke="#888" stroke-width="0.04"/>
+                  <line x1="0" y1="-1" x2="0" y2="-0.85" stroke="#666" stroke-width="0.05"/>
+                  <text x="0" y="-1.05" text-anchor="middle" font-size="0.18" fill="#888">N</text>
+                  <g id="north-needle" transform="rotate(0)">
+                    <polygon points="0,-0.9 0.16,0.5 -0.16,0.5" fill="#222"/>
+                  </g>
+                </svg>
+              </div>
+              <div style="flex:1">
+                <label>Heading (deg)
+                  <input type="number" id="input-north-deg" step="1" min="0" max="359" value="0">
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" id="input-print-north" checked>
+                  Print north arrow on drawing
+                </label>
+              </div>
+            </div>
+            <div>
+              <label class="muted" style="display:block;font-size:11px">Drawing register</label>
+              <table id="register-table" class="register">
+                <thead><tr><th>Rev</th><th>Date</th><th>By</th><th>Note</th><th></th></tr></thead>
+                <tbody></tbody>
+              </table>
+              <button id="btn-add-register-row" class="step-btn"
+                      style="margin-top:4px">+ Add revision</button>
+            </div>
+          </div>
+        </details>
+
+        <h2>2. Scan settings</h2>
+        <div class="scan-settings">
+          <label for="input-max-variance">
+            Max ceiling height variance
+            <span class="muted">— floor / furniture deeper than this below the highest ceiling are excluded</span>
+          </label>
+          <div class="row">
+            <input type="number" id="input-max-variance"
+                   min="0.5" max="6.0" step="0.1" value="1.5">
+            <span>m</span>
+            <button id="btn-apply-variance" class="step-btn">Apply &amp; re-render</button>
+          </div>
+          <p class="muted hint" id="variance-hint">
+            1.5 m suits typical 2.4–3 m ceilings. Raise for vaulted /
+            cathedral rooms; lower to aggressively cull furniture.
+          </p>
+        </div>
+
+        <h2>3. Trace polygons</h2>
         <ol class="workflow">
           <li id="step-room"  class="active">
             <button id="btn-room"  class="step-btn">Trace room outline</button>
@@ -53,13 +121,6 @@
           </li>
         </ol>
 
-        <button id="btn-autodetect" class="step-btn primary" disabled
-                style="margin-top:8px;">Auto-detect from height map</button>
-        <p class="muted hint">
-          Replaces main + regions with up to 5 height-clustered planes
-          covering 100% of the room outline. Run after drawing the room.
-        </p>
-
         <p class="help-blurb">
           <b>What the colour shading means:</b> inside each polygon, every
           pixel is tinted by how far its scanned height sits above (lighter)
@@ -73,12 +134,11 @@
         <div class="tools">
           <button data-tool="select"        class="tool active">Select / drag</button>
           <button data-tool="insert-vertex" class="tool">Insert vertex</button>
-          <button data-tool="delete-vertex" class="tool">Delete vertex</button>
           <button data-tool="cancel-draw"   class="tool" disabled>Cancel draw</button>
         </div>
-        <p class="muted hint" id="tool-hint">Click a vertex to drag.</p>
+        <p class="muted hint" id="tool-hint">Click a vertex to drag. Press <b>Delete</b> over a vertex to remove it.</p>
 
-        <h2>3. Tidy borders</h2>
+        <h2>4. Tidy borders</h2>
         <button id="btn-snap" class="step-btn primary">Snap polygons</button>
         <button id="btn-unsnap" class="step-btn" hidden>Un-snap (edit polygons)</button>
         <p class="muted hint">
@@ -88,7 +148,7 @@
           between two regions moves both. Un-snap to redraw freely.
         </p>
 
-        <h2>4. Export</h2>
+        <h2>5. Export</h2>
         <button id="btn-pdf" class="step-btn primary">Download PDF</button>
         <p class="muted hint">
           Coloured masks, relative-height tags on each polygon, and
@@ -110,6 +170,6 @@
     </div>
   </main>
 
-  <script src="app.js?v=10"></script>
+  <script src="app.js?v=14"></script>
 </body>
 </html>

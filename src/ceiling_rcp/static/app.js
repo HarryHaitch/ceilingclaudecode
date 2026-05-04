@@ -1,4 +1,78 @@
-console.log("[ceiling-rcp] app.js build 10 — topology edits, shift-snap, columns");
+console.log("[ceiling-rcp] app.js build 12 — units, scan settings, vertex UX");
+
+// ─── UNITS ────────────────────────────────────────────────────────────────
+// World coords stay in metres throughout. These helpers turn metres into
+// the user's chosen display string. Mirror of src/ceiling_rcp/units.py —
+// keep the two in sync.
+
+const INCHES_PER_METRE = 39.3700787401574803;
+
+function _gcd(a, b) { return b === 0 ? a : _gcd(b, a % b); }
+
+function _roundToSixteenth(inches) {
+  const totalSixteenths = Math.round(inches * 16);
+  const feet = Math.floor(totalSixteenths / (12 * 16));
+  const rem = totalSixteenths - feet * 12 * 16;
+  const wholeInches = Math.floor(rem / 16);
+  const sixteenths = rem - wholeInches * 16;
+  return [feet, wholeInches, sixteenths];
+}
+
+function _fraction(sixteenths) {
+  if (sixteenths === 0) return "";
+  const g = _gcd(sixteenths, 16);
+  return `${sixteenths / g}/${16 / g}`;
+}
+
+function _imperialLength(metres) {
+  const sign = metres < 0 ? "-" : "";
+  const inches = Math.abs(metres) * INCHES_PER_METRE;
+  const [feet, whole, sixteenths] = _roundToSixteenth(inches);
+  const frac = _fraction(sixteenths);
+  if (feet === 0) {
+    if (whole === 0 && frac === "") return `${sign}0"`;
+    if (whole === 0) return `${sign}${frac}"`;
+    if (frac) return `${sign}${whole} ${frac}"`;
+    return `${sign}${whole}"`;
+  }
+  let inchesPart = `${whole}`;
+  if (frac) inchesPart += ` ${frac}`;
+  return `${sign}${feet}'-${inchesPart}"`;
+}
+
+function _imperialHeightDelta(metres) {
+  if (metres === 0) return '0"';
+  const sign = metres < 0 ? "−" : "+";
+  const inches = Math.abs(metres) * INCHES_PER_METRE;
+  const [feet, whole, sixteenths] = _roundToSixteenth(inches);
+  const frac = _fraction(sixteenths);
+  if (feet === 0) {
+    if (whole === 0 && frac === "") return '0"';
+    if (whole === 0) return `${sign}${frac}"`;
+    if (frac) return `${sign}${whole} ${frac}"`;
+    return `${sign}${whole}"`;
+  }
+  let inchesPart = `${whole}`;
+  if (frac) inchesPart += ` ${frac}`;
+  return `${sign}${feet}'-${inchesPart}"`;
+}
+
+function unitsSystem() {
+  return state.plan?.units || "metric";
+}
+
+function formatLength(metres) {
+  if (unitsSystem() === "imperial") return _imperialLength(metres);
+  if (Math.abs(metres) < 1.0) return `${Math.round(metres * 1000)} mm`;
+  return `${metres.toFixed(2)} m`;
+}
+
+function formatHeightDelta(metres) {
+  if (unitsSystem() === "imperial") return _imperialHeightDelta(metres);
+  if (metres === 0) return "0 mm";
+  const sign = metres < 0 ? "−" : "+";
+  return `${sign}${Math.round(Math.abs(metres) * 1000)} mm`;
+}
 
 // ─── TOPOLOGY HELPERS ─────────────────────────────────────────────────────
 // Post-snap, plan.topology is the source of truth: a planar graph where
@@ -106,12 +180,27 @@ async function unsnapTopology() {
   setTimeout(() => banner.classList.remove("show"), 2500);
 }
 
+function snapAlongOrPerp(x, z, anchor, refDir) {
+  // Snap the cursor position so it lies on either the line through
+  // ``anchor`` along ``refDir`` (collinear with the reference edge) or on
+  // the perpendicular through ``anchor`` — whichever is closer to the
+  // cursor. Returns ``[x, z]`` or ``null`` if the reference is degenerate.
+  const L = Math.hypot(refDir[0], refDir[1]);
+  if (L < 1e-6) return null;
+  const ux = refDir[0] / L, uz = refDir[1] / L;
+  const px = -uz, pz = ux;
+  const rx = x - anchor[0], rz = z - anchor[1];
+  const tParallel = rx * ux + rz * uz;
+  const tPerp = rx * px + rz * pz;
+  if (Math.abs(tPerp) > Math.abs(tParallel)) {
+    return [anchor[0] + tPerp * px, anchor[1] + tPerp * pz];
+  }
+  return [anchor[0] + tParallel * ux, anchor[1] + tParallel * uz];
+}
+
 function constrainShiftSnap(x, z) {
-  // Returns [x, z] for the next vertex constrained to be either collinear
-  // with the previous edge or 90° to it — whichever is closer to the
-  // cursor. Needs at least one previous edge (≥ 2 draft vertices). The
-  // anchor is the LAST drafted vertex; the direction reference is the
-  // edge from the second-to-last to the last vertex.
+  // Drawing case. The anchor is the LAST drafted vertex; the direction
+  // reference is the edge from the second-to-last to the last vertex.
   const n = state.draft.length;
   if (n === 0) return null;
   if (n === 1) {
@@ -122,18 +211,54 @@ function constrainShiftSnap(x, z) {
   }
   const a = state.draft[n - 2];
   const b = state.draft[n - 1];
-  const dx = b[0] - a[0], dz = b[1] - a[1];
-  const L = Math.hypot(dx, dz);
-  if (L < 1e-6) return null;
-  const ux = dx / L, uz = dz / L;       // along previous edge
-  const px = -uz, pz = ux;              // perpendicular (90° CCW in world)
-  const rx = x - b[0], rz = z - b[1];
-  const tParallel = rx * ux + rz * uz;
-  const tPerp = rx * px + rz * pz;
-  if (Math.abs(tPerp) > Math.abs(tParallel)) {
-    return [b[0] + tPerp * px, b[1] + tPerp * pz];
+  return snapAlongOrPerp(x, z, b, [b[0] - a[0], b[1] - a[1]]);
+}
+
+function constrainShiftSnapForDrag(x, z, dragInfo) {
+  // Drag case. Snap the moving vertex relative to its ring neighbours in
+  // the *selected* face (post-snap) or the polygon being dragged
+  // (pre-snap). Reference edge is prev_prev → prev — same construction as
+  // the drawing case.
+  const ring = dragRingFor(dragInfo);
+  if (!ring) return null;
+  const { poly, dragIdx } = ring;
+  if (poly.length < 3 || dragIdx < 0) return null;
+  const n = poly.length;
+  const prev = poly[(dragIdx - 1 + n) % n];
+  const prevPrev = poly[(dragIdx - 2 + n) % n];
+  return snapAlongOrPerp(x, z, prev, [prev[0] - prevPrev[0], prev[1] - prevPrev[1]]);
+}
+
+function dragRingFor(dragInfo) {
+  // Returns the ring `{poly, dragIdx}` to snap against. For pre-snap edits
+  // it's the polygon being dragged; for topology edits it's the selected
+  // face's ring (with the dragged vertex located by world-coord match).
+  if (dragInfo.topologyVid != null) {
+    const topo = state.plan?.topology;
+    if (!topo?.vertices) return null;
+    const target = topo.vertices[dragInfo.topologyVid];
+    if (!target) return null;
+    const sel = state.selection?.key;
+    let face = null;
+    if (sel === "main") face = topo.faces?.find(f => f.id === 0);
+    else if (sel?.startsWith("region:")) {
+      const rid = parseInt(sel.slice(7), 10);
+      face = topo.faces?.find(f => f.region_id === rid || f.id === rid + 1);
+    }
+    if (!face) {
+      // Fallback: any face whose ring contains this world point.
+      face = (topo.faces || []).find(f =>
+        (f.polygon || []).some(([px, pz]) =>
+          Math.hypot(px - target[0], pz - target[1]) < 1e-6));
+    }
+    if (!face?.polygon) return null;
+    const dragIdx = face.polygon.findIndex(([px, pz]) =>
+      Math.hypot(px - target[0], pz - target[1]) < 1e-6);
+    return { poly: face.polygon, dragIdx };
   }
-  return [b[0] + tParallel * ux, b[1] + tParallel * uz];
+  const poly = polygonForKey(dragInfo.key);
+  if (!poly) return null;
+  return { poly, dragIdx: dragInfo.vertexIndex };
 }
 
 async function refreshAllHeatmaps() {
@@ -214,7 +339,7 @@ const state = {
   selection: null,
   drag: null,
   panning: null,
-  hover: { world: null },
+  hover: { world: null, vertex: null },
   // Map of { kind: "room"|"main"|"region:N" → ImageBitmap } for heatmaps
   heatmaps: new Map(),
 };
@@ -258,7 +383,43 @@ document.getElementById("btn-snap").onclick = snapPolygons;
 document.getElementById("btn-unsnap").onclick = unsnapTopology;
 document.getElementById("btn-pdf").onclick = downloadPdf;
 document.getElementById("btn-export").onclick = exportPlan;
-document.getElementById("btn-autodetect").onclick = autoDetect;
+document.getElementById("btn-apply-variance").onclick = applyMaxVariance;
+document.querySelectorAll(".seg-btn[data-units]").forEach(b => {
+  b.onclick = () => setUnits(b.dataset.units);
+});
+document.querySelectorAll("[data-project]").forEach(inp => {
+  inp.addEventListener("input", () => scheduleProjectPush(
+    inp.dataset.project, inp.value));
+});
+document.getElementById("input-north-deg").addEventListener("input", (e) => {
+  const v = ((parseFloat(e.target.value) || 0) % 360 + 360) % 360;
+  setNorthAngleUI(v);
+  scheduleProjectPush("north_deg", v);
+});
+document.getElementById("input-print-north").addEventListener("change", (e) => {
+  scheduleProjectPush("print_north", e.target.checked);
+});
+{
+  const svg = document.getElementById("north-picker");
+  svg.addEventListener("click", (e) => {
+    const rect = svg.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const dx = e.clientX - cx;
+    const dy = e.clientY - cy;
+    // Page-up = 0°, clockwise positive (compass convention).
+    let angle = Math.atan2(dx, -dy) * 180 / Math.PI;
+    if (angle < 0) angle += 360;
+    angle = Math.round(angle);
+    document.getElementById("input-north-deg").value = angle;
+    setNorthAngleUI(angle);
+    scheduleProjectPush("north_deg", angle);
+  });
+}
+document.getElementById("btn-add-register-row").onclick = () => {
+  appendRegisterRow({ rev: "", date: "", by: "", note: "" });
+  pushDrawingRegister();
+};
 
 window.addEventListener("resize", resizeCanvas);
 window.addEventListener("keydown", onKey);
@@ -450,7 +611,6 @@ async function commitDraft() {
       markStepDone("room");
       unlockStep("main");
       unlockStep("column");
-      document.getElementById("btn-autodetect").disabled = false;
     }
   } else if (kind === "main") {
     const r = await fetch(`/api/sessions/${state.sessionId}/main`, {
@@ -556,6 +716,7 @@ async function deletePolygon(kind, regionId) {
       body: JSON.stringify({ polygon: null }),
     });
     state.plan.room = null;
+    state.heatmaps.delete("room");
     document.getElementById("step-room").classList.remove("done");
     document.getElementById("step-room").classList.add("active");
     document.getElementById("step-main").classList.add("locked");
@@ -601,43 +762,164 @@ function setActiveTool(name) {
 
 function updateToolHint() {
   const hints = {
-    "select": "Click a vertex to drag. Click a polygon to select it.",
+    "select": "Click a vertex to drag. Press Delete over a vertex to remove it.",
     "insert-vertex": "Select a polygon, then click on one of its edges to insert a vertex there.",
-    "delete-vertex": "Select a polygon, then click one of its vertices to remove it.",
   };
   const el = document.getElementById("tool-hint");
-  if (el) el.textContent = hints[state.tool] || "";
+  if (el) el.innerHTML = hints[state.tool] || "";
 }
 
-async function autoDetect() {
+// ─── PROJECT METADATA ────────────────────────────────────────────────────
+const _projectPushTimers = {};
+function scheduleProjectPush(key, value) {
   if (!state.sessionId) return;
-  if (!state.plan?.room) { setBanner("Trace the room outline first."); return; }
-  if (!confirm(
-    "Auto-detect will replace any main ceiling and regions you've drawn. " +
-    "Continue?"
-  )) return;
-  setBanner("Auto-detecting heights…");
-  const r = await fetch(`/api/sessions/${state.sessionId}/auto_detect`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({}),
+  if (!state.plan.project) state.plan.project = {};
+  state.plan.project[key] = value;
+  clearTimeout(_projectPushTimers[key]);
+  _projectPushTimers[key] = setTimeout(() => pushProject({ [key]: value }), 350);
+}
+
+async function pushProject(patch) {
+  if (!state.sessionId) return;
+  const r = await fetch(`/api/sessions/${state.sessionId}/project`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
   });
   if (!r.ok) {
-    setBanner("Auto-detect failed: " + (await r.text()).slice(0, 160), true);
+    setBanner("Project save failed: " + (await r.text()).slice(0, 120), true);
+    return;
+  }
+  const d = await r.json();
+  state.plan.project = d.project;
+}
+
+function setNorthAngleUI(deg) {
+  const needle = document.getElementById("north-needle");
+  if (needle) needle.setAttribute("transform", `rotate(${deg})`);
+}
+
+function appendRegisterRow(row) {
+  const tbody = document.querySelector("#register-table tbody");
+  const tr = document.createElement("tr");
+  for (const key of ["rev", "date", "by", "note"]) {
+    const td = document.createElement("td");
+    const inp = document.createElement("input");
+    inp.type = "text";
+    inp.value = row[key] || "";
+    inp.dataset.regField = key;
+    inp.addEventListener("input", () => scheduleRegisterPush());
+    td.appendChild(inp);
+    tr.appendChild(td);
+  }
+  const tdDel = document.createElement("td");
+  const del = document.createElement("button");
+  del.className = "del-row"; del.textContent = "×"; del.title = "Remove";
+  del.onclick = () => { tr.remove(); pushDrawingRegister(); };
+  tdDel.appendChild(del);
+  tr.appendChild(tdDel);
+  tbody.appendChild(tr);
+}
+
+let _regTimer = null;
+function scheduleRegisterPush() {
+  clearTimeout(_regTimer);
+  _regTimer = setTimeout(pushDrawingRegister, 400);
+}
+
+function pushDrawingRegister() {
+  const rows = [];
+  document.querySelectorAll("#register-table tbody tr").forEach(tr => {
+    const row = {};
+    tr.querySelectorAll("input[data-reg-field]").forEach(inp => {
+      row[inp.dataset.regField] = inp.value;
+    });
+    if (row.rev || row.date || row.by || row.note) rows.push(row);
+  });
+  pushProject({ drawing_register: rows });
+}
+
+function syncProjectPanel(project) {
+  if (!project) return;
+  document.querySelectorAll("[data-project]").forEach(inp => {
+    const k = inp.dataset.project;
+    if (k in project) inp.value = project[k] ?? "";
+  });
+  const deg = Number(project.north_deg) || 0;
+  document.getElementById("input-north-deg").value = Math.round(deg);
+  setNorthAngleUI(deg);
+  document.getElementById("input-print-north").checked =
+    project.print_north !== false;
+  // Drawing register table.
+  const tbody = document.querySelector("#register-table tbody");
+  tbody.innerHTML = "";
+  for (const row of (project.drawing_register || [])) {
+    appendRegisterRow(row);
+  }
+}
+
+async function setUnits(value) {
+  if (!state.sessionId) return;
+  if (state.plan?.units === value) return;
+  const r = await fetch(`/api/sessions/${state.sessionId}/units`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value }),
+  });
+  if (!r.ok) {
+    setBanner("Units update failed: " + (await r.text()).slice(0, 120), true);
+    return;
+  }
+  state.plan.units = value;
+  applyUnitsToggleUI();
+  refreshPolygonsList();
+  // Variance preview, region label info, etc. reflect the new units.
+  const sel = state.selection;
+  if (sel) updateSelectionInfo();
+}
+
+function applyUnitsToggleUI() {
+  const sys = state.plan?.units || "metric";
+  document.querySelectorAll(".seg-btn[data-units]").forEach(b => {
+    b.classList.toggle("active", b.dataset.units === sys);
+  });
+}
+
+async function applyMaxVariance() {
+  if (!state.sessionId) return;
+  const inp = document.getElementById("input-max-variance");
+  const v = Number.parseFloat(inp.value);
+  if (!Number.isFinite(v) || v < 0.5 || v > 6.0) {
+    setBanner("Enter a value between 0.5 and 6.0 m.", true);
+    return;
+  }
+  if (state.plan?.topology) {
+    const ok = confirm(
+      "Re-rendering will drop the current snap (you'll need to Snap again). " +
+      "Continue?"
+    );
+    if (!ok) return;
+  }
+  setBanner("Re-rendering with new ceiling-variance limit…");
+  const r = await fetch(`/api/sessions/${state.sessionId}/scan_settings`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ max_ceiling_variance_m: v }),
+  });
+  if (!r.ok) {
+    setBanner("Re-render failed: " + (await r.text()).slice(0, 160), true);
     return;
   }
   state.plan = await r.json();
   state.heatmaps.clear();
-  if (state.plan.room_heatmap) await refreshHeatmap("room", state.plan.room_heatmap);
+  if (state.plan.room_heatmap)
+    await refreshHeatmap("room", state.plan.room_heatmap);
   if (state.plan.main) await refreshHeatmap("main", state.plan.main);
   for (const reg of state.plan.regions || [])
     await refreshHeatmap("region:" + reg.id, reg);
-  markStepDone("main");
-  unlockStep("region");
+  await loadCeilingImage();
+  fitView();
   refreshPolygonsList();
   draw();
-  const n = (state.plan.regions || []).length + (state.plan.main ? 1 : 0);
-  setBanner(`Auto-detect found ${n} planes — refine, snap, or export.`);
+  setBanner("Re-rendered. Re-snap if you had snapped.");
   setTimeout(() => banner.classList.remove("show"), 3000);
 }
 
@@ -708,17 +990,39 @@ function refreshPolygonsList() {
   const ul = document.getElementById("polygons-list");
   ul.innerHTML = "";
 
-  const addRow = (key, label, color, meta, selKey, currentNotes, allowNotes) => {
+  const addRow = (key, label, color, meta, selKey, currentNotes, allowNotes, allowTintEdit) => {
     const li = document.createElement("li");
     li.className = "poly-row" + (state.selection?.key === selKey ? " active" : "");
     const head = document.createElement("div");
     head.className = "poly-head";
-    head.innerHTML =
-      `<div class="swatch" style="background:${color}"></div>` +
-      `<div class="label">${label}</div>` +
-      `<div class="meta">${meta}</div>` +
-      `<button class="del-btn" title="Delete">×</button>`;
+    if (allowTintEdit) {
+      head.innerHTML =
+        `<input type="color" class="swatch swatch-input" value="${color}" title="Change tint">` +
+        `<div class="label">${label}</div>` +
+        `<div class="meta">${meta}</div>` +
+        `<button class="del-btn" title="Delete">×</button>`;
+    } else {
+      head.innerHTML =
+        `<div class="swatch" style="background:${color}"></div>` +
+        `<div class="label">${label}</div>` +
+        `<div class="meta">${meta}</div>` +
+        `<button class="del-btn" title="Delete">×</button>`;
+    }
     li.appendChild(head);
+
+    if (allowTintEdit) {
+      const sw = head.querySelector(".swatch-input");
+      sw.onclick = (e) => e.stopPropagation();
+      let tintTimer = null;
+      sw.oninput = () => {
+        clearTimeout(tintTimer);
+        tintTimer = setTimeout(() => pushTintForKey(selKey, sw.value), 250);
+      };
+      sw.onchange = () => {
+        clearTimeout(tintTimer);
+        pushTintForKey(selKey, sw.value);
+      };
+    }
 
     if (allowNotes) {
       const noteRow = document.createElement("div");
@@ -755,30 +1059,28 @@ function refreshPolygonsList() {
 
   if (state.plan.room) {
     addRow("room", "Room outline", "#ffe082",
-      `${state.plan.room.length} verts`, "room", null, false);
+      `${state.plan.room.length} verts`, "room", null, false, false);
   }
   if (state.plan.main) {
     const s = state.plan.main.stats;
     addRow("main", state.plan.main.label || "Main Ceiling (1)",
       state.plan.main.tint || "#80cbc4",
-      `0 mm  σ${(s.std_y * 1000).toFixed(0)} mm`,
-      "main", state.plan.main.notes, true);
+      `${formatHeightDelta(0)}  variance ${formatLength(s.std_y)}`,
+      "main", state.plan.main.notes, true, true);
   }
   for (const r of state.plan.regions || []) {
     const s = r.stats;
     const rel = r.relative_y;
-    const relTxt = rel === null || rel === undefined
-      ? "—"
-      : (rel >= 0 ? "+" : "") + (rel * 1000).toFixed(0) + " mm";
+    const relTxt = rel === null || rel === undefined ? "—" : formatHeightDelta(rel);
     addRow("region:" + r.id, r.label || `Ceiling Region (${r.id + 2})`,
       r.tint || "#ff7043",
-      `${relTxt}  σ${(s.std_y * 1000).toFixed(0)} mm`,
-      "region:" + r.id, r.notes, true);
+      `${relTxt}  variance ${formatLength(s.std_y)}`,
+      "region:" + r.id, r.notes, true, true);
   }
   for (const o of state.plan.obstructions || []) {
     addRow("column:" + o.id, o.label || `Column (${o.id + 1})`,
       "#ffffff", `${o.polygon.length} verts`,
-      "column:" + o.id, null, false);
+      "column:" + o.id, null, false, false);
   }
   updateSelectionInfo();
 }
@@ -821,14 +1123,14 @@ function updateSelectionInfo() {
 }
 
 function renderStats(title, s, relativeY) {
-  const fmt_std = (s.std_y * 1000).toFixed(0);
+  const fmt_std = formatLength(s.std_y);
   const fmt_rel = relativeY === null || relativeY === undefined
-    ? "0 mm (datum)"
-    : (relativeY >= 0 ? "+" : "") + (relativeY * 1000).toFixed(0) + " mm";
+    ? `${formatHeightDelta(0)} (datum)`
+    : formatHeightDelta(relativeY);
   const valid_pct = (s.valid_frac * 100).toFixed(0);
-  const range_mm = ((s.max_y - s.min_y) * 1000).toFixed(0);
+  const fmt_range = formatLength(s.max_y - s.min_y);
   const warn = s.std_y > 0.05
-    ? `<div class="warn-line">⚠ high variance (${fmt_std} mm) — likely clipped a bulkhead</div>`
+    ? `<div class="warn-line">⚠ high variance (${fmt_std}) — likely clipped a bulkhead</div>`
     : "";
   const validWarn = s.valid_frac < 0.6
     ? `<div class="warn-line">⚠ only ${valid_pct}% of polygon has LiDAR coverage</div>`
@@ -836,8 +1138,8 @@ function renderStats(title, s, relativeY) {
   return `
     <b>${title}</b><br>
     relative height: ${fmt_rel}<br>
-    σ inside polygon: ${fmt_std} mm<br>
-    range inside polygon: ${range_mm} mm<br>
+    variance inside polygon: ${fmt_std}<br>
+    range inside polygon: ${fmt_range}<br>
     LiDAR coverage: ${valid_pct}%
     ${warn}${validWarn}
   `;
@@ -915,6 +1217,30 @@ function draw() {
   // Draft polygon being drawn
   if (state.mode.startsWith("draw_") && state.draft.length > 0) {
     drawDraft();
+  }
+
+  // Hovered-vertex highlight (drawn on top of everything so it's always
+  // visible). Communicates "Delete will hit *this* one".
+  if (state.hover.vertex && !state.drag && !state.mode.startsWith("draw_")) {
+    let world = null;
+    const h = state.hover.vertex;
+    if (h.topologyVid != null) {
+      world = state.plan?.topology?.vertices?.[h.topologyVid] || null;
+    } else {
+      const poly = polygonForKey(h.key);
+      world = poly ? poly[h.vertexIndex] : null;
+    }
+    if (world) {
+      const v = worldToImg(world[0], world[1]);
+      const r = 7 / state.view.scale;
+      ctx.beginPath();
+      ctx.arc(v.u, v.v, r, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+      ctx.fill();
+      ctx.strokeStyle = "#00e5ff";
+      ctx.lineWidth = 2 / state.view.scale;
+      ctx.stroke();
+    }
   }
 
   ctx.restore();
@@ -1122,30 +1448,7 @@ function onMouseDown(e) {
     }
   }
 
-  // Delete-vertex mode: click an existing vertex to remove it.
-  // Post-snap: deletes the topology vertex (interior or degree-2 only);
-  // pre-snap: spliced out of the selected polygon.
-  if (state.tool === "delete-vertex") {
-    if (state.plan?.topology) {
-      const w = canvasToWorld(m.x, m.y);
-      const vid = topologyVertexAtWorld(w.x, w.z, 0.05);  // 5cm grab radius
-      if (vid >= 0) {
-        deleteTopologyVertex(vid);
-        return;
-      }
-      return;
-    }
-    if (!state.selection) return;
-    const poly = polygonForKey(state.selection.key);
-    if (!poly || poly.length <= 3) return;
-    const vi = nearestVertexIndex(poly, m.x, m.y, 12);
-    if (vi >= 0) {
-      poly.splice(vi, 1);
-      pushPolygonForKey(state.selection.key);
-      draw();
-      return;
-    }
-  }
+  // (Vertex deletion is handled by the Delete key in onKey, not by a tool.)
 
   // Select mode: click on a polygon vertex to drag, or click polygon edge to select
   const hit = hitTest(m.x, m.y);
@@ -1219,7 +1522,15 @@ function onMouseMove(e) {
   }
 
   if (state.drag) {
-    const w = canvasToWorld(m.x, m.y);
+    let w = canvasToWorld(m.x, m.y);
+    if (e.shiftKey) {
+      // Constrain the dragged-to point to be 0/90° relative to the prev
+      // edge of the selected face's ring — same intent as draw-mode shift
+      // but anchored to the existing polygon instead of an in-progress
+      // draft.
+      const c = constrainShiftSnapForDrag(w.x, w.z, state.drag);
+      if (c) w = { x: c[0], z: c[1] };
+    }
     if (state.drag.topologyVid != null) {
       // Move the shared topology vertex; all incident face polygons follow.
       state.plan.topology.vertices[state.drag.topologyVid] = [w.x, w.z];
@@ -1231,9 +1542,50 @@ function onMouseMove(e) {
     draw(); return;
   }
 
+  // Track which vertex (if any) the cursor is hovering over — used by the
+  // Delete-key handler and as a visual affordance in the canvas redraw.
+  state.hover.vertex = findHoveredVertex(m.x, m.y, 12);
+
   if (state.mode.startsWith("draw_")) draw();
-  else readout.textContent =
-    `x ${state.hover.world.x.toFixed(2)} m   z ${state.hover.world.z.toFixed(2)} m`;
+  else {
+    readout.textContent =
+      `x ${state.hover.world.x.toFixed(2)} m   z ${state.hover.world.z.toFixed(2)} m`;
+    draw();
+  }
+}
+
+function findHoveredVertex(cx, cy, thresholdPx) {
+  // Post-snap: prefer topology vertices so a junction shared by N faces
+  // resolves to the single shared id (consistent with the drag path).
+  if (state.plan?.topology) {
+    const verts = state.plan.topology.vertices || [];
+    let best = -1, bestD = thresholdPx;
+    for (let vid = 0; vid < verts.length; vid++) {
+      const ic = imgToCanvas(...Object.values(worldToImg(verts[vid][0], verts[vid][1])));
+      const d = Math.hypot(ic.cx - cx, ic.cy - cy);
+      if (d < bestD) { bestD = d; best = vid; }
+    }
+    if (best >= 0) return { topologyVid: best };
+  }
+  // Pre-snap (or for column polygons that aren't part of topology): hit-
+  // test every visible polygon's vertices.
+  const candidates = [];
+  if (state.plan?.room) candidates.push({ key: "room", poly: state.plan.room });
+  if (state.plan?.main) candidates.push({ key: "main", poly: state.plan.main.polygon });
+  for (const r of state.plan?.regions || [])
+    candidates.push({ key: "region:" + r.id, poly: r.polygon });
+  for (const o of state.plan?.obstructions || [])
+    candidates.push({ key: "column:" + o.id, poly: o.polygon });
+  let best = null, bestD = thresholdPx;
+  for (const c of candidates) {
+    if (!c.poly) continue;
+    for (let i = 0; i < c.poly.length; i++) {
+      const ic = imgToCanvas(...Object.values(worldToImg(c.poly[i][0], c.poly[i][1])));
+      const d = Math.hypot(ic.cx - cx, ic.cy - cy);
+      if (d < bestD) { bestD = d; best = { key: c.key, vertexIndex: i }; }
+    }
+  }
+  return best;
 }
 
 async function onMouseUp(e) {
@@ -1274,6 +1626,13 @@ function onKey(e) {
     if (state.draft.length >= 3) commitDraft();
   } else if (e.key === "Escape") {
     cancelDraw();
+  } else if ((e.key === "Delete" || e.key === "Backspace") && e.type === "keydown") {
+    // Delete the vertex under the cursor. Drag is the default click
+    // behaviour; this is the only path to vertex deletion.
+    if (state.mode.startsWith("draw_")) return;  // don't intercept while drawing
+    if (!state.hover.vertex) return;
+    e.preventDefault();
+    deleteHoveredVertex();
   } else if (e.key === "Shift" && state.mode.startsWith("draw_") && state.hover.world) {
     // Re-snap the preview the instant shift is pressed/released, even
     // if the mouse hasn't moved since.
@@ -1283,6 +1642,26 @@ function onKey(e) {
     if (c) state.hover.world = { x: c[0], z: c[1] };
     draw();
   }
+}
+
+async function deleteHoveredVertex() {
+  const h = state.hover.vertex;
+  if (!h) return;
+  if (h.topologyVid != null) {
+    await deleteTopologyVertex(h.topologyVid);
+    state.hover.vertex = null;
+    return;
+  }
+  // Pre-snap (or column) — splice the vertex out of the polygon and push.
+  const poly = polygonForKey(h.key);
+  if (!poly || poly.length <= 3) {
+    setBanner("Polygon needs at least 3 vertices.", true);
+    return;
+  }
+  poly.splice(h.vertexIndex, 1);
+  state.hover.vertex = null;
+  await pushPolygonForKey(h.key);
+  draw();
 }
 window.addEventListener("keyup", onKey);
 
@@ -1310,6 +1689,10 @@ function hitTest(cx, cy) {
   if (state.plan.main) all.push({ key: "main", poly: state.plan.main.polygon });
   for (const r of state.plan.regions || [])
     all.push({ key: "region:" + r.id, poly: r.polygon });
+  // Columns are hit-testable too — they're not part of the topology graph
+  // but the user must still be able to drag/select their vertices.
+  for (const o of state.plan.obstructions || [])
+    all.push({ key: "column:" + o.id, poly: o.polygon });
 
   const selKey = state.selection?.key;
   const ordered = selKey
@@ -1361,6 +1744,65 @@ function pointInPolygonCanvas(poly, cx, cy) {
   return inside;
 }
 
+async function pushTintForKey(key, tint) {
+  if (!state.sessionId || !key || !tint) return;
+  const topo = state.plan?.topology;
+  let url, body;
+  if (topo) {
+    // Find the face id corresponding to the legacy key.
+    let faceId = null;
+    if (key === "main") {
+      faceId = 0;
+    } else if (key.startsWith("region:")) {
+      const rid = parseInt(key.slice(7), 10);
+      const f = (topo.faces || []).find(
+        f => f.region_id === rid || (f.kind !== "main" && f.id === rid + 1));
+      if (f) faceId = f.id;
+    }
+    if (faceId == null) return;
+    url = `/api/sessions/${state.sessionId}/topology/face/${faceId}/tint`;
+    body = { tint };
+  } else if (key === "main") {
+    url = `/api/sessions/${state.sessionId}/main/tint`;
+    body = { tint };
+  } else if (key.startsWith("region:")) {
+    const rid = parseInt(key.slice(7), 10);
+    url = `/api/sessions/${state.sessionId}/region/${rid}`;
+    body = { tint };
+  } else {
+    return;  // columns / room don't support tint editing
+  }
+  const r = await fetch(url, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    setBanner("Tint update failed: " + (await r.text()).slice(0, 120), true);
+    return;
+  }
+  const d = await r.json();
+  // Topology endpoint returns the full plan; main/region endpoints return
+  // just the updated entity. Apply both shapes.
+  if (d.plan) {
+    state.plan = d.plan;
+  } else if (d.main) {
+    state.plan.main = d.main;
+  } else if (d.region) {
+    const reg = state.plan.regions.find(r => r.id === d.region.id);
+    if (reg) Object.assign(reg, d.region);
+  }
+  // Refresh heatmap for the affected face.
+  if (key === "main" && state.plan.main) {
+    await refreshHeatmap("main", state.plan.main);
+  } else if (key.startsWith("region:")) {
+    const rid = parseInt(key.slice(7), 10);
+    const reg = state.plan.regions.find(r => r.id === rid);
+    if (reg) await refreshHeatmap("region:" + rid, reg);
+  }
+  refreshPolygonsList();
+  draw();
+}
+
 async function pushPolygonForKey(key) {
   if (key === "room") {
     const r = await fetch(`/api/sessions/${state.sessionId}/room`, {
@@ -1398,6 +1840,25 @@ async function pushPolygonForKey(key) {
       Object.assign(reg, d.region);
       await refreshHeatmap("region:" + id, d.region);
     }
+  } else if (key.startsWith("column:")) {
+    const id = parseInt(key.slice(7), 10);
+    const obs = (state.plan.obstructions || []).find(o => o.id === id);
+    if (!obs) return;
+    const r = await fetch(`/api/sessions/${state.sessionId}/obstruction/${id}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ polygon: obs.polygon }),
+    });
+    if (r.ok) {
+      const d = await r.json();
+      // Server auto re-snaps when topology exists; replace the whole plan
+      // so the topology + heatmaps stay coherent.
+      if (d.snapped && d.plan) {
+        state.plan = d.plan;
+        await refreshAllHeatmaps();
+      } else if (d.obstruction) {
+        Object.assign(obs, d.obstruction);
+      }
+    }
   }
   refreshPolygonsList();
   draw();
@@ -1429,10 +1890,16 @@ async function loadFromUrlParam() {
     document.getElementById("upload-section").hidden = true;
     document.getElementById("workflow").hidden = false;
     document.getElementById("btn-export").disabled = false;
+    const sv = state.plan?.scan_settings?.max_ceiling_variance_m;
+    if (typeof sv === "number" && Number.isFinite(sv)) {
+      document.getElementById("input-max-variance").value = sv.toFixed(1);
+    }
+    if (!state.plan.units) state.plan.units = "metric";
+    applyUnitsToggleUI();
+    syncProjectPanel(state.plan.project);
     if (state.plan.room) {
       markStepDone("room"); unlockStep("main");
       unlockStep("column");
-      document.getElementById("btn-autodetect").disabled = false;
     }
     if (state.plan.room_heatmap)
       await refreshHeatmap("room", state.plan.room_heatmap);

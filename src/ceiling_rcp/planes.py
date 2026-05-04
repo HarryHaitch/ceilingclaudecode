@@ -207,7 +207,7 @@ def assign_faces(
 # ─── XZ RASTERISATION ─────────────────────────────────────────────────────────
 
 def make_grid(mesh: Mesh, down_face_indices: np.ndarray, *,
-              pad_m: float = 0.3, pixels_per_metre: float = 100.0) -> PlanGrid:
+              pad_m: float = 0.9, pixels_per_metre: float = 100.0) -> PlanGrid:
     verts_used = np.unique(mesh.FV[down_face_indices].flatten())
     xs = mesh.V[verts_used, 0]
     zs = mesh.V[verts_used, 2]

@@ -114,6 +114,56 @@ ol.workflow li.done { border-color: var(--ok); }
 .step-btn.drawing { background: var(--accent-hot); border-color: var(--accent); color: #00131f; }
 .step-status { margin-top: 4px; font-size: 11px; line-height: 1.3; }
 
+.project-panel {
+  margin: 0 0 10px 0; padding: 4px 8px;
+  border: 1px solid var(--line); border-radius: 4px; background: #1a1d20;
+}
+.project-panel summary { cursor: pointer; padding: 4px 0; }
+.project-panel summary h2 { margin: 0; font-size: 14px; }
+.project-fields { display: flex; flex-direction: column; gap: 6px; padding: 6px 0; }
+.project-fields label { font-size: 12px; color: var(--muted); display: block; }
+.project-fields input[type="text"], .project-fields input[type="number"] {
+  width: 100%; padding: 4px 6px; margin-top: 2px;
+}
+.project-fields .checkbox { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.project-fields .checkbox input { margin: 0; }
+.project-fields .north-row { display: flex; gap: 12px; align-items: stretch; }
+.register { width: 100%; border-collapse: collapse; font-size: 11px; }
+.register th, .register td {
+  padding: 2px 4px; border: 1px solid var(--line); text-align: left;
+}
+.register th { color: var(--muted); font-weight: normal; font-size: 10px; }
+.register input { width: 100%; box-sizing: border-box; padding: 2px 4px; font-size: 11px; }
+.register .del-row { background: transparent; border: none; color: var(--muted); cursor: pointer; }
+.register .del-row:hover { color: var(--error); }
+
+.units-toggle {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 0 10px 0; padding: 6px 8px;
+  border: 1px solid var(--line); border-radius: 4px; background: #1a1d20;
+}
+.seg-buttons {
+  display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden;
+}
+.seg-btn {
+  padding: 4px 10px; background: transparent; border: none;
+  color: var(--text); font-size: 12px; cursor: pointer;
+}
+.seg-btn + .seg-btn { border-left: 1px solid var(--line); }
+.seg-btn.active { background: #00838f; color: white; }
+
+.scan-settings {
+  margin: 6px 0 12px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #1a1d20;
+}
+.scan-settings label { font-size: 12px; display: block; margin-bottom: 4px; }
+.scan-settings .row { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.scan-settings input[type="number"] { width: 70px; padding: 4px 6px; }
+.scan-settings .step-btn { flex: 1; }
+
 .tools { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .tools .tool { flex: 1 0 calc(50% - 4px); }
 .tools .tool.active { background: #00838f; border-color: #00acc1; color: white; }
@@ -156,6 +206,12 @@ ul#polygons-list { list-style: none; padding: 0; margin: 0; }
 .poly-row:hover { border-color: #4a4f56; }
 .poly-row.active { border-color: var(--accent-hot); background: #1f2a32; }
 .poly-row .swatch { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }
+.poly-row .swatch-input {
+  width: 18px; height: 18px; padding: 0; border: 1px solid var(--line);
+  border-radius: 3px; cursor: pointer; background: transparent;
+}
+.poly-row .swatch-input::-webkit-color-swatch { border: none; border-radius: 2px; }
+.poly-row .swatch-input::-moz-color-swatch { border: none; border-radius: 2px; }
 .poly-row .label { flex: 1; font-size: 12px; }
 .poly-row .meta { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .poly-row input[type=checkbox] { margin: 0; }

@@ -14,9 +14,13 @@ on auto-detect algorithms against a hand-drawn ground truth.
 ## Quick start
 
 ```bash
-# install
-pip install -e .                                         # also installs scikit-image via dev deps if you want the lab
-pip install -e ".[dev]"                                  # explicit form
+# install (use the module form if `pip` isn't on PATH)
+python3 -m pip install -e .                              # core deps
+python3 -m pip install -e ".[dev]"                       # adds scikit-image for the lab
+
+# verify the install points at this checkout (not a stray editable install
+# from another path)
+python3 -c "import ceiling_rcp; print(ceiling_rcp.__file__)"
 
 # terminal 1 — long-running server
 ceiling-rcp-server --port 8765
@@ -30,34 +34,50 @@ ceiling-rcp-init "Scan data/Lachys Polycam"
 
 The browser walks you through:
 
-1. **Trace room outline** — click vertices, click first to close.
-2. **Trace main ceiling** OR click **Auto-detect from height map** —
-   defines the height datum.
-3. **Add ceiling regions** — recesses (+mm above main), bulkheads
-   (−mm below main).
-4. **Snap polygons** — push/pull every polygon's borders so they share
-   clean edges and tile the room without gaps or overlap.
-5. **Download PDF** — coloured masks, height tags, dimensioned room
-   outline.
+1. **Pick units** — first control in the side panel: mm/m or ft-in.
+   Affects PDF labels, scale bar, and side-panel display.
+2. **Set scan settings** — `Max ceiling height variance` (default
+   1.5 m) controls how far below the dominant ceiling the renderer
+   will keep geometry. Lower = aggressive furniture culling; higher
+   = handles vaulted / cathedral rooms. Re-render after changing.
+3. **Trace polygons** — room outline → main ceiling → ceiling
+   regions (+mm recesses / −mm bulkheads) → optional column
+   obstructions. Hold **Shift** while clicking or dragging to snap
+   to 0° / 90° relative to the previous edge. Click a vertex to
+   drag; press **Delete** with a vertex hovered to remove it;
+   "Insert vertex" tool button to add one mid-edge.
+4. **Snap polygons** — pushes/pulls every polygon's borders so they
+   share clean edges and tile the room without gaps or overlap.
+   Adjacent edges become *one* shared topology edge: dragging it
+   moves both faces.
+5. **Fill in project info** — name, address, client, company,
+   drawing number, north heading, drawing register. All flow into
+   the title block of the exported PDF.
+6. **Download PDF** — A1 landscape, title block on right, ortho
+   thumbnail, scale bar, north arrow, ceiling-zone legend.
 
 Each polygon shows a brightness shading inside it: pixels scanned
 higher than that polygon's mean tint lighter, lower tint darker.
 A clean flat ceiling is uniformly tinted; a clipped bulkhead jumps
-out as a visibly different shade.
+out as a visibly different shade. Click any zone's swatch in the
+side panel to recolour it.
 
 ## Where things live
 
 | Path | What |
 | --- | --- |
-| `src/ceiling_rcp/mesh.py` | OBJ / MTL parser, `alignmentTransform` handling, folder validator |
+| `src/ceiling_rcp/mesh.py` | OBJ / MTL parser, `alignmentTransform` handling, `ceiling_face_mask` (60° cone + height-band filter) |
 | `src/ceiling_rcp/raster.py` | Top-down textured render + per-pixel height map (z-buffer) |
 | `src/ceiling_rcp/analyse.py` | Per-polygon mean Y, σ, deviation heatmap PNG |
 | `src/ceiling_rcp/planes.py` | `PlanGrid` (XZ pixel ↔ world conversion); legacy auto-segmentation kept for the debug CLI |
 | `src/ceiling_rcp/polygons.py` | Mask-to-polygon, polygon edit primitives |
-| `src/ceiling_rcp/server.py` | FastAPI app: upload, process, room/main/region edit, snap, auto-detect, PDF |
+| `src/ceiling_rcp/topology.py` | Planar graph builder (vertices/edges/faces with holes), post-snap edits |
+| `src/ceiling_rcp/polylabel.py` | Pole-of-inaccessibility (Mapbox polylabel) for region label placement, hole-aware |
+| `src/ceiling_rcp/units.py` | Metric ↔ imperial display formatting (length, height delta) |
+| `src/ceiling_rcp/server.py` | FastAPI app: process, room/main/region/obstruction edit, scan-settings/units/project, snap, topology edits, A1 PDF |
 | `src/ceiling_rcp/init_session.py` | `ceiling-rcp-init` — staging a scan into a server session without going through the browser |
 | `src/ceiling_rcp/cli.py` | `ceiling-rcp` legacy debug CLI |
-| `src/ceiling_rcp/static/` | Single-page canvas editor (no framework) |
+| `src/ceiling_rcp/static/` | Single-page canvas editor (no framework) — units toggle, project panel, swatch picker |
 | `debug/` | Segmentation lab — algorithms, scoring, experiment harness |
 | `docs/` | Coordinate-system reference and other design notes |
 
@@ -81,23 +101,37 @@ All endpoints live under `/api/sessions/`. See [`ARCHITECTURE.md`](ARCHITECTURE.
 for the full list with bodies; the short version:
 
 ```
-POST   /api/sessions                        upload
-POST   /api/sessions/{id}/process           render + height map
-GET    /api/sessions/{id}/plan              full plan json
-GET    /api/sessions/{id}/image/ceiling.jpg textured render
+POST   /api/sessions                                  upload
+POST   /api/sessions/{id}/process                     render + height map
+GET    /api/sessions/{id}/plan                        full plan json
+GET    /api/sessions/{id}/image/ceiling.jpg           textured render
+GET    /api/sessions/{id}/export                      full plan json, download form
 
-PUT    /api/sessions/{id}/room              set / clear room polygon
-PUT    /api/sessions/{id}/main              set / clear main ceiling
-POST   /api/sessions/{id}/region            add ceiling region
-PUT    /api/sessions/{id}/region/{rid}      update polygon / label / notes
-DELETE /api/sessions/{id}/region/{rid}      delete region
-PUT    /api/sessions/{id}/main/notes        update main's notes
+GET / PUT /api/sessions/{id}/project                  title-block + drawing register + north
+PUT    /api/sessions/{id}/units                       "metric" | "imperial"
+PUT    /api/sessions/{id}/scan_settings               max_ceiling_variance_m → re-renders
 
-POST   /api/sessions/{id}/auto_detect       histogram-cluster auto-fill
-POST   /api/sessions/{id}/snap              Voronoi-style border tidy
+PUT    /api/sessions/{id}/room                        set / clear room polygon
+PUT    /api/sessions/{id}/main                        set / clear main ceiling
+PUT    /api/sessions/{id}/main/notes                  update main's notes
+PUT    /api/sessions/{id}/main/tint                   recolour main
+POST   /api/sessions/{id}/region                      add ceiling region
+PUT    /api/sessions/{id}/region/{rid}                update polygon / label / notes / tint
+DELETE /api/sessions/{id}/region/{rid}                delete region
+POST   /api/sessions/{id}/obstruction                 add column
+PUT    /api/sessions/{id}/obstruction/{oid}           update column polygon / label
+DELETE /api/sessions/{id}/obstruction/{oid}           delete column
 
-GET    /api/sessions/{id}/pdf               architectural PDF download
-GET    /api/sessions/{id}/export            full plan json, download form
+POST   /api/sessions/{id}/snap                        build planar topology, share edges
+DELETE /api/sessions/{id}/topology                    un-snap
+PUT    /api/sessions/{id}/topology/vertices           drag vertex(es)
+POST   /api/sessions/{id}/topology/edge/{eid}/insert_vertex   split edge
+DELETE /api/sessions/{id}/topology/vertex/{vid}       remove vertex
+PUT    /api/sessions/{id}/topology/face/{fid}/notes   per-face notes
+PUT    /api/sessions/{id}/topology/face/{fid}/tint    recolour face
+
+POST   /api/sessions/{id}/auto_detect                 histogram-cluster auto-fill (legacy, no UI)
+GET    /api/sessions/{id}/pdf                         A1 architectural PDF download
 ```
 
 ## Coordinate system

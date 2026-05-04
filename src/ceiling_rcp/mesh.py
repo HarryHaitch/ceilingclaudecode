@@ -332,6 +332,55 @@ def downward_face_mask(normals: np.ndarray, max_tilt_deg: float = 30.0) -> np.nd
     return normals[:, 1] < threshold
 
 
+def ceiling_face_mask(
+    mesh: "Mesh",
+    *,
+    max_tilt_deg: float = 60.0,
+    max_ceiling_variance_m: float = 1.5,
+) -> np.ndarray:
+    """Faces that count as *ceiling* — the basis for the ortho image and height map.
+
+    Combines two filters:
+
+    1. **Downward-facing cone** — ``|normal.y| < -cos(max_tilt_deg)``. Wider
+       than ``downward_face_mask`` (60° default vs 30°) so tilted bulkhead
+       edges, vault flanks, and slightly-noisy LiDAR triangles render
+       instead of leaving black holes in the ortho.
+    2. **Ceiling height band** — reject any down-face whose mean Y is more
+       than ``max_ceiling_variance_m`` below the area-weighted 95th-percentile
+       Y of all down-faces. That percentile is a robust "highest ceiling"
+       signal; the band catches couches, table undersides, kitchen-cabinet
+       bottoms — anything below the actual ceiling envelope.
+
+    For a typical 2.7 m ceiling with default 1.5 m variance, threshold = 1.2 m
+    so couches (≤ 0.5 m world Y) drop out and door headers (~2 m) survive.
+    For double-height / cathedral rooms the user raises the variance.
+    """
+    normals = mesh.face_normals()
+    threshold_n = -np.cos(np.deg2rad(max_tilt_deg))
+    down = normals[:, 1] < threshold_n
+    if not down.any():
+        return down
+
+    # Mean Y per down-face triangle, area-weighted — robust to one stray
+    # high triangle dragging the percentile up.
+    face_y = mesh.V[mesh.FV[down]][..., 1].mean(axis=1)
+    face_area = mesh.face_areas()[down]
+    sort_idx = np.argsort(face_y)
+    cum_area = np.cumsum(face_area[sort_idx])
+    if cum_area[-1] <= 0:
+        return down
+    target = 0.95 * cum_area[-1]
+    pick = int(np.searchsorted(cum_area, target))
+    pick = min(pick, len(sort_idx) - 1)
+    ceiling_top_y = float(face_y[sort_idx[pick]])
+    threshold_y = ceiling_top_y - float(max_ceiling_variance_m)
+
+    keep = down.copy()
+    keep[down] &= face_y >= threshold_y
+    return keep
+
+
 __all__ = [
     "Mesh",
     "FolderReport",
@@ -341,4 +390,5 @@ __all__ = [
     "apply_alignment_inv",
     "world_y_range",
     "downward_face_mask",
+    "ceiling_face_mask",
 ]

@@ -668,19 +668,26 @@ def _build_face_rings(edges, vertex_pool, assignment):
                 cur = nxt
             rings.append(ring)
 
-        # Sort rings by signed area (in world coords). The outer ring of a
-        # face is the largest CCW one; holes are smaller and CW. For the
-        # MVP we only emit the outer ring (sorted by absolute area, take
-        # the largest); holes get logged as a warning by the caller.
+        # Sort rings by signed area (in world coords). The outer ring is
+        # the largest by absolute area and CCW (positive signed area in
+        # the RCP convention). Smaller rings are holes (CW, negative area)
+        # — almost always a column inside a face. We keep all of them so
+        # per-face stats can subtract holes and the PDF can render the
+        # face with its hole(s) cut out.
         rings_with_area = [(_signed_ring_area(r, edges, vertex_pool), r) for r in rings]
         rings_with_area.sort(key=lambda a_r: abs(a_r[0]), reverse=True)
         outer_ring = rings_with_area[0][1] if rings_with_area else []
+        hole_rings = [r for _, r in rings_with_area[1:]]
 
         kind = "main" if fid == 0 else "region"
         out_faces.append({
             "id": int(fid),
             "kind": kind,
             "ring": [{"edge": h[0], "rev": h[1]} for h in outer_ring],
+            "holes": [
+                [{"edge": h[0], "rev": h[1]} for h in ring]
+                for ring in hole_rings
+            ],
         })
 
     return out_faces

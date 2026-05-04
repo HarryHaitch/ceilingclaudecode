@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import uuid
 import zipfile
@@ -48,9 +49,16 @@ from .analyse import (
     deviation_heatmap_png,
     height_map_to_storage,
 )
-from .mesh import inspect_folder, load_mesh, downward_face_mask
+from .mesh import inspect_folder, load_mesh, ceiling_face_mask, downward_face_mask
 from .planes import PlanGrid, make_grid
+from .polylabel import polylabel, longest_edge_angle_deg
 from .raster import render_textured_topdown
+from .units import (
+    DEFAULT_UNITS,
+    UNIT_SYSTEMS,
+    format_height_delta,
+    format_length,
+)
 
 
 # ─── PATHS ────────────────────────────────────────────────────────────────────
@@ -69,7 +77,7 @@ def _session_dir(session_id: str) -> Path:
 # Schema version for plan.json. Bump when the on-disk shape changes; add a
 # migration step in _migrate_plan. Files written by older versions are
 # upgraded transparently on first read.
-PLAN_SCHEMA_VERSION = 2
+PLAN_SCHEMA_VERSION = 3
 
 
 def _migrate_plan(plan: dict[str, Any]) -> dict[str, Any]:
@@ -81,9 +89,23 @@ def _migrate_plan(plan: dict[str, Any]) -> dict[str, Any]:
         # property until the user re-snaps; the polygons themselves are
         # preserved so editing still works.
         plan.setdefault("topology", None)
-        plan["schema_version"] = 2
+    if v < 3:
+        # v2 → v3: introduces plan["units"], plan["scan_settings"],
+        # plan["project"]. All optional with sensible defaults.
+        plan.setdefault("units", "metric")
+        plan.setdefault("scan_settings", {"max_ceiling_variance_m": 1.5})
+    plan["schema_version"] = PLAN_SCHEMA_VERSION
     # Field-level defaults that don't warrant a schema bump.
     plan.setdefault("obstructions", [])
+    proj = plan.get("project") or {}
+    defaults = {
+        "name": "", "address": "", "client": "", "company": "",
+        "drawing_number": "", "north_deg": 0.0, "print_north": True,
+        "drawing_register": [],
+    }
+    for k, v_default in defaults.items():
+        proj.setdefault(k, v_default)
+    plan["project"] = proj
     return plan
 
 
@@ -139,10 +161,35 @@ def _extract_upload(
 
 # ─── PROCESSING ───────────────────────────────────────────────────────────────
 
-def process_session(session_id: str, *, ppm: int = 150) -> dict[str, Any]:
-    """Render the textured top-down + height map from an uploaded scan.
+DEFAULT_MAX_CEILING_VARIANCE_M = 1.5
 
-    No automatic segmentation — the user draws polygons by hand.
+
+def _default_project() -> dict[str, Any]:
+    """Empty project metadata. The user fills these in via the project
+    panel; the PDF reads them straight off."""
+    return {
+        "name": "",
+        "address": "",
+        "client": "",
+        "company": "",
+        "drawing_number": "",
+        "north_deg": 0.0,           # rotation in degrees, CCW from +Z (page up)
+        "print_north": True,        # if False, the arrow is omitted
+        "drawing_register": [],     # list of {rev, date, by, note}
+    }
+
+
+def _do_render(
+    session_id: str,
+    *,
+    ppm: int,
+    max_ceiling_variance_m: float,
+) -> tuple[Any, dict[str, Any], dict[str, Any] | None] | None:
+    """Render ceiling.jpg + height.npy for a session.
+
+    Returns ``(folder_report, grid_dict, height_summary)`` on success, or
+    ``None`` if the upload folder is broken (caller writes the report).
+    Doesn't touch plan.json — caller is responsible for persisting.
     """
     sd = _session_dir(session_id)
     upload = sd / "upload"
@@ -150,57 +197,101 @@ def process_session(session_id: str, *, ppm: int = 150) -> dict[str, Any]:
     out.mkdir(parents=True, exist_ok=True)
 
     rep = inspect_folder(upload)
-    plan: dict[str, Any] = {
-        "session_id": session_id,
-        "schema_version": PLAN_SCHEMA_VERSION,
-        "report": {
-            "ok": rep.ok,
-            "obj": str(rep.obj) if rep.obj else None,
-            "mtl": str(rep.mtl) if rep.mtl else None,
-            "mesh_info": str(rep.mesh_info) if rep.mesh_info else None,
-            "textures_found": len(rep.textures_found),
-            "textures_missing": rep.textures_missing,
-            "warnings": rep.warnings,
-            "errors": rep.errors,
-        },
-        "room": None,
-        "main": None,
-        "regions": [],
-        "obstructions": [],
-        "topology": None,
-    }
-
     if not rep.ok:
-        (out / "plan.json").write_text(json.dumps(plan, indent=2))
-        return plan
+        return None
 
     mesh = load_mesh(rep)
-    normals = mesh.face_normals()
-    down = downward_face_mask(normals, max_tilt_deg=30.0)
-    down_idx = np.where(down)[0]
+    keep = ceiling_face_mask(
+        mesh,
+        max_tilt_deg=60.0,
+        max_ceiling_variance_m=float(max_ceiling_variance_m),
+    )
+    keep_idx = np.where(keep)[0]
 
-    grid = make_grid(mesh, down_idx, pixels_per_metre=ppm)
-    canvas, zbuf = render_textured_topdown(mesh, down_idx, grid)
+    grid = make_grid(mesh, keep_idx, pixels_per_metre=ppm)
+    canvas, zbuf = render_textured_topdown(mesh, keep_idx, grid)
     cv2.imwrite(str(out / "ceiling.jpg"), canvas, [cv2.IMWRITE_JPEG_QUALITY, 88])
 
     height_map = height_map_to_storage(zbuf)
     np.save(out / "height.npy", height_map)
 
-    plan["grid"] = {
+    grid_dict = {
         "min_x": grid.min_x, "max_x": grid.max_x,
         "min_z": grid.min_z, "max_z": grid.max_z,
         "pixels_per_metre": grid.pixels_per_metre,
         "width": grid.width, "height": grid.height,
     }
+    height_summary: dict[str, Any] | None = None
     valid = ~np.isnan(height_map)
     if valid.any():
-        plan["height_summary"] = {
+        height_summary = {
             "min_y": float(np.nanmin(height_map)),
             "max_y": float(np.nanmax(height_map)),
             "median_y": float(np.nanmedian(height_map)),
             "valid_px": int(valid.sum()),
             "total_px": int(height_map.size),
         }
+    return rep, grid_dict, height_summary
+
+
+def _report_dict(rep: Any) -> dict[str, Any]:
+    return {
+        "ok": rep.ok,
+        "obj": str(rep.obj) if rep.obj else None,
+        "mtl": str(rep.mtl) if rep.mtl else None,
+        "mesh_info": str(rep.mesh_info) if rep.mesh_info else None,
+        "textures_found": len(rep.textures_found),
+        "textures_missing": rep.textures_missing,
+        "warnings": rep.warnings,
+        "errors": rep.errors,
+    }
+
+
+def process_session(
+    session_id: str,
+    *,
+    ppm: int = 150,
+    max_ceiling_variance_m: float = DEFAULT_MAX_CEILING_VARIANCE_M,
+) -> dict[str, Any]:
+    """Initial render — fresh plan, fresh ceiling.jpg + height.npy.
+
+    No automatic segmentation — the user draws polygons by hand.
+    """
+    sd = _session_dir(session_id)
+    out = sd / "out"
+    out.mkdir(parents=True, exist_ok=True)
+    upload = sd / "upload"
+    rep = inspect_folder(upload)
+    plan: dict[str, Any] = {
+        "session_id": session_id,
+        "schema_version": PLAN_SCHEMA_VERSION,
+        "report": _report_dict(rep),
+        "room": None,
+        "main": None,
+        "regions": [],
+        "obstructions": [],
+        "topology": None,
+        "units": DEFAULT_UNITS,
+        "scan_settings": {
+            "max_ceiling_variance_m": float(max_ceiling_variance_m),
+        },
+        "project": _default_project(),
+    }
+
+    if not rep.ok:
+        (out / "plan.json").write_text(json.dumps(plan, indent=2))
+        return plan
+
+    result = _do_render(
+        session_id, ppm=ppm, max_ceiling_variance_m=max_ceiling_variance_m,
+    )
+    if result is None:
+        (out / "plan.json").write_text(json.dumps(plan, indent=2))
+        return plan
+    _, grid_dict, height_summary = result
+    plan["grid"] = grid_dict
+    if height_summary is not None:
+        plan["height_summary"] = height_summary
     (out / "plan.json").write_text(json.dumps(plan, indent=2))
     return plan
 
@@ -211,6 +302,7 @@ def _analyse_and_pack(
     session_id: str, polygon: list[list[float]] | None = None,
     *, mask: np.ndarray | None = None,
     stats_mask: np.ndarray | None = None,
+    holes: list[list[list[float]]] | None = None,
     range_m: float = 0.05, tint: str = "#80cbc4",
 ) -> dict:
     """Compute mean Y + tinted deviation heatmap.
@@ -220,6 +312,11 @@ def _analyse_and_pack(
     computed from it instead — useful for auto-detect where we want
     stats to ignore wrongly-absorbed cross-cluster pixels even though
     they remain in the visual polygon.
+
+    ``holes``, if given, is a list of inner rings (typically column
+    polygons) whose pixels are subtracted from the mask. This keeps the
+    heatmap and stats from including column-wall LiDAR noise inside a
+    face that contains an obstruction.
     """
     import base64
     from .analyse import polygon_to_mask
@@ -231,6 +328,12 @@ def _analyse_and_pack(
         mask = polygon_to_mask([tuple(p) for p in polygon], grid) > 0
     else:
         mask = mask > 0
+    if holes:
+        for hole in holes:
+            if not hole or len(hole) < 3:
+                continue
+            hmask = polygon_to_mask([tuple(p) for p in hole], grid) > 0
+            mask = mask & ~hmask
     if stats_mask is None:
         stats_mask = mask
     else:
@@ -366,6 +469,133 @@ async def api_create_session(
 @app.post("/api/sessions/{session_id}/process")
 async def api_process(session_id: str, ppm: int = Form(150)) -> dict:
     return process_session(session_id, ppm=ppm)
+
+
+@app.get("/api/sessions/{session_id}/project")
+async def api_get_project(session_id: str) -> dict:
+    plan = _load_plan(session_id)
+    return plan.get("project") or _default_project()
+
+
+@app.put("/api/sessions/{session_id}/project")
+async def api_set_project(session_id: str, payload: dict = Body(...)) -> dict:
+    """Update project metadata (title-block fields + drawing register +
+    north arrow). All fields are optional; missing keys keep their old
+    values."""
+    plan = _load_plan(session_id)
+    proj = plan.get("project") or _default_project()
+    for key in ("name", "address", "client", "company", "drawing_number"):
+        if key in payload:
+            proj[key] = str(payload[key])[:200]
+    if "north_deg" in payload:
+        try:
+            proj["north_deg"] = float(payload["north_deg"]) % 360.0
+        except (TypeError, ValueError):
+            raise HTTPException(400, "north_deg must be numeric")
+    if "print_north" in payload:
+        proj["print_north"] = bool(payload["print_north"])
+    if "drawing_register" in payload:
+        register = payload["drawing_register"] or []
+        if not isinstance(register, list):
+            raise HTTPException(400, "drawing_register must be a list")
+        proj["drawing_register"] = [
+            {
+                "rev": str((row or {}).get("rev", ""))[:8],
+                "date": str((row or {}).get("date", ""))[:32],
+                "by": str((row or {}).get("by", ""))[:32],
+                "note": str((row or {}).get("note", ""))[:200],
+            }
+            for row in register
+        ]
+    plan["project"] = proj
+    _save_plan(session_id, plan)
+    return {"ok": True, "project": proj}
+
+
+@app.put("/api/sessions/{session_id}/units")
+async def api_set_units(session_id: str, payload: dict = Body(...)) -> dict:
+    """Pick metric or imperial display. World coords stay in metres
+    everywhere — only display strings (PDF labels, side panel) change."""
+    plan = _load_plan(session_id)
+    value = payload.get("value")
+    if value not in UNIT_SYSTEMS:
+        raise HTTPException(
+            400, f"value must be one of {UNIT_SYSTEMS!r}; got {value!r}",
+        )
+    plan["units"] = value
+    _save_plan(session_id, plan)
+    return {"ok": True, "units": value}
+
+
+@app.put("/api/sessions/{session_id}/scan_settings")
+async def api_set_scan_settings(session_id: str, payload: dict = Body(...)) -> dict:
+    """Update scan-settings (currently just ``max_ceiling_variance_m``) and
+    re-render the ortho image + height map.
+
+    User-drawn polygons (room, main, regions, obstructions) are preserved —
+    their stats and heatmaps are refreshed against the new height map.
+    Any topology is dropped (snapped state is invalidated by re-render);
+    the user re-snaps when ready.
+    """
+    plan = _load_plan(session_id)
+    raw = payload.get("max_ceiling_variance_m")
+    if raw is None:
+        raise HTTPException(400, "max_ceiling_variance_m required")
+    try:
+        new_var = float(raw)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "max_ceiling_variance_m must be numeric")
+    if not (0.5 <= new_var <= 6.0):
+        raise HTTPException(400, "max_ceiling_variance_m must be between 0.5 and 6.0 metres")
+
+    ppm = int((plan.get("grid") or {}).get("pixels_per_metre") or 150)
+    result = _do_render(
+        session_id, ppm=ppm, max_ceiling_variance_m=new_var,
+    )
+    if result is None:
+        raise HTTPException(400, "scan upload is no longer valid; reprocess from CLI")
+    rep, grid_dict, height_summary = result
+    plan["report"] = _report_dict(rep)
+    plan["grid"] = grid_dict
+    if height_summary is not None:
+        plan["height_summary"] = height_summary
+    plan.setdefault("scan_settings", {})["max_ceiling_variance_m"] = new_var
+
+    # Refresh per-polygon stats + heatmaps against the new height map.
+    if plan.get("room"):
+        plan["room_heatmap"] = _analyse_and_pack(
+            session_id, plan["room"], range_m=0.15, tint="#ffffff",
+        )
+    if plan.get("main"):
+        m = plan["main"]
+        analysis = _analyse_and_pack(
+            session_id, m["polygon"],
+            range_m=float(m.get("heatmap_range_m", 0.05)),
+            tint=m.get("tint", MAIN_TINT),
+        )
+        m.update(analysis)
+        m.setdefault("relative_y", 0.0)
+    datum = (plan.get("main") or {}).get("stats", {}).get("mean_y")
+    for r in plan.get("regions", []):
+        analysis = _analyse_and_pack(
+            session_id, r["polygon"],
+            range_m=float(r.get("heatmap_range_m", 0.05)),
+            tint=r.get("tint", _region_tint(r.get("id", 0))),
+        )
+        r.update(analysis)
+        m_y = r.get("stats", {}).get("mean_y")
+        r["relative_y"] = (
+            float(m_y - datum) if (m_y is not None and datum is not None) else None
+        )
+
+    # Topology bbox / heatmap pixel coords are tied to the old grid; drop
+    # the topology so the user re-snaps against the new render.
+    if plan.get("topology") is not None:
+        plan["topology"] = None
+    plan["snapped"] = False
+
+    _save_plan(session_id, plan)
+    return plan
 
 
 @app.get("/api/sessions/{session_id}/plan")
@@ -591,7 +821,7 @@ async def api_update_region(
                 analysis = _analyse_and_pack(
                     session_id, payload["polygon"],
                     range_m=float(payload.get("range_m", r.get("heatmap_range_m", 0.05))),
-                    tint=_region_tint(region_id),
+                    tint=_validate_tint(payload.get("tint"), r.get("tint", _region_tint(region_id))),
                 )
                 r["polygon"] = [list(p) for p in payload["polygon"]]
                 r.update(analysis)
@@ -603,6 +833,16 @@ async def api_update_region(
             if "notes" in payload:
                 r["notes"] = str(payload["notes"])[:500]
                 _mirror_notes_to_topology(plan, region_id=region_id, notes=r["notes"])
+            if "tint" in payload and "polygon" not in payload:
+                # Tint-only update: re-pack the heatmap so its tint matches.
+                tint = _validate_tint(payload["tint"], r.get("tint", _region_tint(region_id)))
+                analysis = _analyse_and_pack(
+                    session_id, r["polygon"],
+                    range_m=float(r.get("heatmap_range_m", 0.05)),
+                    tint=tint,
+                )
+                r.update(analysis)
+                _mirror_tint_to_topology(plan, region_id=region_id, tint=tint)
             _save_plan(session_id, plan)
             return {"ok": True, "region": r}
     raise HTTPException(404, f"unknown region {region_id}")
@@ -618,6 +858,50 @@ async def api_main_notes(session_id: str, payload: dict = Body(...)) -> dict:
     _mirror_notes_to_topology(plan, region_id=None, notes=notes)
     _save_plan(session_id, plan)
     return {"ok": True}
+
+
+@app.put("/api/sessions/{session_id}/main/tint")
+async def api_main_tint(session_id: str, payload: dict = Body(...)) -> dict:
+    """Recolour the main ceiling (legacy + topology-mirrored) and refresh
+    its tinted heatmap PNG. Doesn't touch geometry or stats."""
+    plan = _load_plan(session_id)
+    if not plan.get("main"):
+        raise HTTPException(409, "main not set")
+    tint = _validate_tint(payload.get("tint"), plan["main"].get("tint", MAIN_TINT))
+    analysis = _analyse_and_pack(
+        session_id, plan["main"]["polygon"],
+        range_m=float(plan["main"].get("heatmap_range_m", 0.05)),
+        tint=tint,
+    )
+    plan["main"].update(analysis)
+    _mirror_tint_to_topology(plan, region_id=None, tint=tint)
+    _save_plan(session_id, plan)
+    return {"ok": True, "main": plan["main"]}
+
+
+_HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def _validate_tint(value: Any, fallback: str) -> str:
+    if value is None:
+        return fallback
+    s = str(value).strip()
+    if not _HEX_RE.match(s):
+        raise HTTPException(400, f"tint must be #rrggbb hex; got {value!r}")
+    return s
+
+
+def _mirror_tint_to_topology(plan: dict, *, region_id: int | None, tint: str) -> None:
+    """Keep ``plan['topology'].faces[*].tint`` in sync with the legacy
+    ``main`` / ``regions`` tint. ``region_id=None`` means main."""
+    topo = plan.get("topology")
+    if topo is None:
+        return
+    for face in topo.get("faces", []):
+        if region_id is None and face.get("kind") == "main":
+            face["tint"] = tint
+        elif region_id is not None and face.get("region_id") == region_id:
+            face["tint"] = tint
 
 
 def _mirror_notes_to_topology(plan: dict, *, region_id: int | None, notes: str) -> None:
@@ -986,7 +1270,7 @@ async def api_snap(session_id: str) -> dict:
             "kind": "main",
             "polygon": plan["main"]["polygon"],
             "label": plan["main"].get("label", "Main Ceiling (1)"),
-            "tint": MAIN_TINT,
+            "tint": plan["main"].get("tint") or MAIN_TINT,
             "notes": plan["main"].get("notes", ""),
         })
     for r in plan.get("regions", []):
@@ -996,7 +1280,7 @@ async def api_snap(session_id: str) -> dict:
             "id": int(r["id"]),
             "polygon": r["polygon"],
             "label": r.get("label", f"Ceiling Region ({int(r['id']) + 2})"),
-            "tint": _region_tint(int(r["id"])),
+            "tint": r.get("tint") or _region_tint(int(r["id"])),
             "notes": r.get("notes", ""),
         })
     if not polygons:
@@ -1070,24 +1354,34 @@ async def api_snap(session_id: str) -> dict:
         raise HTTPException(409, "snap produced no faces — try widening the room polygon")
 
     # Decorate each topology face with the matching polygon's metadata +
-    # a fresh height analysis on the new polygon shape.
+    # a fresh height analysis on the new polygon shape (with column holes
+    # subtracted from the per-face mask).
+    edges_list = topo["edges"]
+    vert_list = topo["vertices"]
     main_face = next((f for f in topo["faces"] if f["id"] == 0), None)
     if main_face is None:
         raise HTTPException(409, "main ceiling lost all coverage after snapping")
     main_coords = main_face["polygon"]
+    main_holes = _resolve_face_holes(main_face, edges_list, vert_list)
+    main_face["holes_polygons"] = main_holes
     main_meta = polygons[0]
-    main_analysis = _analyse_and_pack(session_id, main_coords, tint=MAIN_TINT)
+    main_tint = main_meta.get("tint") or MAIN_TINT
+    main_analysis = _analyse_and_pack(
+        session_id, main_coords, holes=main_holes, tint=main_tint,
+    )
     main_face.update({
         "label": main_meta["label"],
         "notes": main_meta["notes"],
-        "tint": MAIN_TINT,
+        "tint": main_tint,
         "relative_y": 0.0,
         **main_analysis,
     })
     plan["main"] = {
         "polygon": main_coords,
+        "holes_polygons": main_holes,
         "label": main_meta["label"],
         "notes": main_meta["notes"],
+        "tint": main_tint,
         **main_analysis,
     }
     datum = main_analysis["stats"]["mean_y"]
@@ -1098,15 +1392,20 @@ async def api_snap(session_id: str) -> dict:
             continue
         meta = polygons[face["id"]]  # face id matches polygons-list index
         coords = face["polygon"]
+        holes = _resolve_face_holes(face, edges_list, vert_list)
+        face["holes_polygons"] = holes
         rid = int(meta["id"])
-        analysis = _analyse_and_pack(session_id, coords, tint=_region_tint(rid))
+        face_tint = meta.get("tint") or _region_tint(rid)
+        analysis = _analyse_and_pack(
+            session_id, coords, holes=holes, tint=face_tint,
+        )
         m = analysis["stats"]["mean_y"]
         relative_y = (m - datum) if (m is not None and datum is not None) else None
         face.update({
             "region_id": rid,
             "label": meta["label"],
             "notes": meta["notes"],
-            "tint": _region_tint(rid),
+            "tint": face_tint,
             "relative_y": relative_y,
             **analysis,
         })
@@ -1115,7 +1414,9 @@ async def api_snap(session_id: str) -> dict:
             "label": meta["label"],
             "notes": meta["notes"],
             "polygon": coords,
+            "holes_polygons": holes,
             "relative_y": relative_y,
+            "tint": face_tint,
             **analysis,
         })
 
@@ -1129,17 +1430,29 @@ async def api_snap(session_id: str) -> dict:
 # ─── TOPOLOGY EDITS (post-snap) ───────────────────────────────────────────────
 
 
-def _resolve_face_polygon(face: dict, edges: list[dict], vertices: list[list[float]]) -> list[list[float]]:
-    """Walk a face's ring of {edge, rev} entries against the given vertex pool."""
-    edges_by_id = {e["id"]: e for e in edges}
+def _resolve_ring(ring: list[dict], edges_by_id: dict, vertices: list[list[float]]) -> list[list[float]]:
     pts: list[list[float]] = []
-    for h in face["ring"]:
+    for h in ring:
         e = edges_by_id[h["edge"]]
         verts = list(reversed(e["vertices"])) if h["rev"] else e["vertices"]
         for vid in verts[:-1]:
             x, z = vertices[vid]
             pts.append([float(x), float(z)])
     return pts
+
+
+def _resolve_face_polygon(face: dict, edges: list[dict], vertices: list[list[float]]) -> list[list[float]]:
+    """Walk a face's ring of {edge, rev} entries against the given vertex pool."""
+    edges_by_id = {e["id"]: e for e in edges}
+    return _resolve_ring(face["ring"], edges_by_id, vertices)
+
+
+def _resolve_face_holes(face: dict, edges: list[dict], vertices: list[list[float]]) -> list[list[list[float]]]:
+    """Resolve every hole ring on a face into a polygon. Empty if no holes."""
+    if not face.get("holes"):
+        return []
+    edges_by_id = {e["id"]: e for e in edges}
+    return [_resolve_ring(ring, edges_by_id, vertices) for ring in face["holes"]]
 
 
 def _refresh_topology_polygons(plan: dict, session_id: str) -> None:
@@ -1159,20 +1472,25 @@ def _refresh_topology_polygons(plan: dict, session_id: str) -> None:
         coords = _resolve_face_polygon(main_face, edges, vertices)
         if len(coords) < 3:
             raise HTTPException(409, "main face collapsed to fewer than 3 vertices")
-        analysis = _analyse_and_pack(session_id, coords, tint=MAIN_TINT)
+        holes = _resolve_face_holes(main_face, edges, vertices)
+        tint = main_face.get("tint", MAIN_TINT)
+        analysis = _analyse_and_pack(session_id, coords, holes=holes, tint=tint)
         main_face["polygon"] = coords
+        main_face["holes_polygons"] = holes
         main_face.update({
             "label": main_face.get("label", "Main Ceiling (1)"),
             "notes": main_face.get("notes", ""),
-            "tint": MAIN_TINT,
+            "tint": tint,
             "relative_y": 0.0,
             **analysis,
         })
         datum = analysis["stats"]["mean_y"]
         plan["main"] = {
             "polygon": coords,
+            "holes_polygons": holes,
             "label": main_face.get("label", "Main Ceiling (1)"),
             "notes": main_face.get("notes", ""),
+            "tint": tint,
             **analysis,
         }
 
@@ -1184,13 +1502,16 @@ def _refresh_topology_polygons(plan: dict, session_id: str) -> None:
         if len(coords) < 3:
             # Face collapsed; drop it (topology stays but the region view skips).
             continue
+        holes = _resolve_face_holes(face, edges, vertices)
         rid = int(face.get("region_id", face["id"] - 1))
-        analysis = _analyse_and_pack(session_id, coords, tint=_region_tint(rid))
+        tint = face.get("tint", _region_tint(rid))
+        analysis = _analyse_and_pack(session_id, coords, holes=holes, tint=tint)
         m = analysis["stats"]["mean_y"]
         relative_y = (m - datum) if (m is not None and datum is not None) else None
         face["polygon"] = coords
+        face["holes_polygons"] = holes
         face.update({
-            "tint": _region_tint(rid),
+            "tint": tint,
             "relative_y": relative_y,
             **analysis,
         })
@@ -1199,7 +1520,9 @@ def _refresh_topology_polygons(plan: dict, session_id: str) -> None:
             "label": face.get("label", f"Ceiling Region ({rid + 2})"),
             "notes": face.get("notes", ""),
             "polygon": coords,
+            "holes_polygons": holes,
             "relative_y": relative_y,
+            "tint": tint,
             **analysis,
         })
     plan["regions"] = new_regions
@@ -1326,6 +1649,51 @@ async def api_topology_set_face_notes(
     return {"ok": True}
 
 
+@app.put("/api/sessions/{session_id}/topology/face/{face_id}/tint")
+async def api_topology_set_face_tint(
+    session_id: str, face_id: int, payload: dict = Body(...),
+) -> dict:
+    """Recolour a face (post-snap). Mirrors the value into the legacy
+    ``main`` / ``regions`` view and refreshes the heatmap PNG."""
+    plan = _load_plan(session_id)
+    topo = plan.get("topology")
+    if topo is None:
+        raise HTTPException(409, "no topology yet — snap first")
+    face = next((f for f in topo["faces"] if f["id"] == face_id), None)
+    if face is None:
+        raise HTTPException(404, f"unknown face {face_id}")
+    tint = _validate_tint(payload.get("tint"), face.get("tint", MAIN_TINT))
+    face["tint"] = tint
+    # Mirror to the legacy view + refresh heatmap, preserving any column holes.
+    holes = face.get("holes_polygons") or _resolve_face_holes(
+        face, topo["edges"], topo["vertices"],
+    )
+    if face_id == 0 and plan.get("main"):
+        analysis = _analyse_and_pack(
+            session_id, plan["main"]["polygon"],
+            holes=holes,
+            range_m=float(plan["main"].get("heatmap_range_m", 0.05)),
+            tint=tint,
+        )
+        plan["main"]["tint"] = tint
+        plan["main"].update(analysis)
+    else:
+        rid = int(face.get("region_id", face_id - 1))
+        for r in plan.get("regions", []):
+            if r["id"] == rid:
+                analysis = _analyse_and_pack(
+                    session_id, r["polygon"],
+                    holes=holes,
+                    range_m=float(r.get("heatmap_range_m", 0.05)),
+                    tint=tint,
+                )
+                r["tint"] = tint
+                r.update(analysis)
+                break
+    _save_plan(session_id, plan)
+    return {"ok": True, "plan": plan}
+
+
 # ─── PDF EXPORT ───────────────────────────────────────────────────────────────
 
 @app.get("/api/sessions/{session_id}/pdf")
@@ -1338,15 +1706,21 @@ async def api_pdf(session_id: str) -> Response:
         raise HTTPException(400, "room required for PDF")
 
     import io
+    import math as _math
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from matplotlib.patches import Polygon as MplPolygon
+    from matplotlib.patches import (
+        Polygon as MplPolygon, PathPatch, Rectangle, FancyArrow,
+    )
+    from matplotlib.path import Path as MplPath
 
     room = plan["room"]
     main = plan.get("main")
     regions = plan.get("regions", [])
     topo = plan.get("topology")
+    units = plan.get("units") or DEFAULT_UNITS
+    project = plan.get("project") or _default_project()
 
     xs = [p[0] for p in room]
     zs = [p[1] for p in room]
@@ -1355,11 +1729,23 @@ async def api_pdf(session_id: str) -> Response:
     minz, maxz = min(zs) - pad, max(zs) + pad
     width_m = maxx - minx
     height_m = maxz - minz
-    aspect = width_m / max(height_m, 1e-6)
 
-    fig_w = 11.0
-    fig_h = max(8.5, fig_w / aspect)
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    # ─── A1 landscape page (841 × 594 mm = 33.11 × 23.39 in) ──
+    # gridspec: plan area (top-left) + title block (full-height right strip)
+    # + legend strip (bottom-left).
+    A1_W_IN, A1_H_IN = 33.11, 23.39
+    fig = plt.figure(figsize=(A1_W_IN, A1_H_IN))
+    gs = fig.add_gridspec(
+        nrows=2, ncols=2,
+        width_ratios=[3.2, 1.0],   # plan : title block
+        height_ratios=[5.0, 1.0],  # plan : legend
+        left=0.02, right=0.98, top=0.98, bottom=0.02,
+        hspace=0.03, wspace=0.03,
+    )
+    ax = fig.add_subplot(gs[0, 0])
+    title_ax = fig.add_subplot(gs[:, 1])
+    legend_ax = fig.add_subplot(gs[1, 0])
+
     ax.set_aspect("equal")
     # RCP convention: mirror X so the plan reads with floor-plan handedness.
     ax.set_xlim(maxx, minx)
@@ -1378,11 +1764,34 @@ async def api_pdf(session_id: str) -> Response:
     use_topology = topo is not None and bool(topo.get("edges"))
     fill_alpha = 0.45
 
-    def _fill(poly_pts, *, face_color, edge_color, label, rel_text, notes):
+    def _fill(poly_pts, *, face_color, edge_color, label, rel_text, notes,
+              holes=None):
         if not poly_pts:
             return
         pts = [(p[0], p[1]) for p in poly_pts]
-        if use_topology:
+        if holes:
+            # Build a holed Path: outer ring CCW, each hole CW. matplotlib
+            # uses the even-odd / non-zero fill rule depending on
+            # orientation, so we trust the topology builder's CCW/CW
+            # convention rather than re-orienting here.
+            verts = list(pts) + [pts[0]]
+            codes = ([MplPath.MOVETO] + [MplPath.LINETO] * (len(pts) - 1)
+                     + [MplPath.CLOSEPOLY])
+            for hole in holes:
+                if not hole or len(hole) < 3:
+                    continue
+                hpts = [(p[0], p[1]) for p in hole]
+                verts += hpts + [hpts[0]]
+                codes += ([MplPath.MOVETO] + [MplPath.LINETO] * (len(hpts) - 1)
+                          + [MplPath.CLOSEPOLY])
+            path = MplPath(verts, codes)
+            patch = PathPatch(
+                path, facecolor=face_color,
+                edgecolor="none" if use_topology else edge_color,
+                linewidth=0 if use_topology else 1.5,
+                alpha=fill_alpha,
+            )
+        elif use_topology:
             patch = MplPolygon(pts, closed=True, facecolor=face_color,
                                edgecolor="none", alpha=fill_alpha)
         else:
@@ -1390,37 +1799,52 @@ async def api_pdf(session_id: str) -> Response:
                                edgecolor=edge_color, linewidth=1.5,
                                alpha=fill_alpha)
         ax.add_patch(patch)
-        cx = sum(p[0] for p in pts) / len(pts)
-        cz = sum(p[1] for p in pts) / len(pts)
+        # Pole of inaccessibility — keeps the label inside the actual face
+        # (centroid falls outside L-shapes and avoids column holes).
+        outer_ring = [(p[0], p[1]) for p in pts]
+        hole_rings = [
+            [(p[0], p[1]) for p in (h or [])]
+            for h in (holes or [])
+            if h and len(h) >= 3
+        ]
+        try:
+            cx, cz = polylabel(outer_ring, hole_rings, precision=0.02)
+        except Exception:
+            cx = sum(p[0] for p in pts) / len(pts)
+            cz = sum(p[1] for p in pts) / len(pts)
+        angle = longest_edge_angle_deg(outer_ring)
         text = f"{label}\n{rel_text}"
         if notes:
             text += f"\n{notes}"
         ax.text(cx, cz, text,
-                ha="center", va="center",
+                ha="center", va="center", rotation=angle,
                 fontsize=8, fontweight="bold",
                 bbox=dict(boxstyle="round,pad=0.25",
                           facecolor="white", edgecolor=edge_color, linewidth=0.6))
 
+    # Hole rings come straight from the topology faces when present; the
+    # legacy ``main`` / ``regions`` views also carry them for parity.
+    def _holes_for(face_view: dict) -> list:
+        return face_view.get("holes_polygons") or []
+
     if main:
         _fill(main["polygon"],
-              face_color=MAIN_TINT, edge_color="#00897b",
+              face_color=main.get("tint", MAIN_TINT), edge_color="#00897b",
               label=main.get("label", "Main Ceiling (1)"),
-              rel_text="0 mm",
-              notes=main.get("notes", ""))
+              rel_text=format_height_delta(0.0, units),
+              notes=main.get("notes", ""),
+              holes=_holes_for(main))
 
     for r in regions:
         rel = r.get("relative_y")
-        if rel is None:
-            rel_text = "—"
-        else:
-            sign = "+" if rel >= 0 else "−"
-            rel_text = f"{sign}{abs(rel) * 1000:.0f} mm"
+        rel_text = "—" if rel is None else format_height_delta(float(rel), units)
         _fill(r["polygon"],
               face_color=r.get("tint", "#ff7043"),
               edge_color="#444",
               label=r.get("label", f"region {r['id']}"),
               rel_text=rel_text,
-              notes=r.get("notes", ""))
+              notes=r.get("notes", ""),
+              holes=_holes_for(r))
 
     # ─── Edges (one stroke per topology edge) ──
     # Interior edges (shared between two faces) get the standard line
@@ -1448,22 +1872,16 @@ async def api_pdf(session_id: str) -> Response:
 
     # ─── Obstructions (columns) — hatched on top of fills ──
     # Drawn last so the cross-hatch reads above any region fill that
-    # might otherwise be visible inside the column outline.
+    # might otherwise be visible inside the column outline. No per-column
+    # label on the drawing — the legend carries a single "Columns" entry.
     for obs in plan.get("obstructions", []):
         pts = [(p[0], p[1]) for p in obs.get("polygon", [])]
         if len(pts) < 3:
             continue
         patch = MplPolygon(pts, closed=True,
                            facecolor="white", edgecolor="#222",
-                           linewidth=1.5, hatch="//", alpha=1.0)
+                           linewidth=1.5, hatch="xx", alpha=1.0)
         ax.add_patch(patch)
-        cx = sum(p[0] for p in pts) / len(pts)
-        cz = sum(p[1] for p in pts) / len(pts)
-        ax.text(cx, cz, obs.get("label", "Column"),
-                ha="center", va="center",
-                fontsize=7, fontweight="bold", color="#222",
-                bbox=dict(boxstyle="round,pad=0.18",
-                          facecolor="white", edgecolor="#222", linewidth=0.5))
 
     n = len(room)
     for i in range(n):
@@ -1474,15 +1892,15 @@ async def api_pdf(session_id: str) -> Response:
         L = (dx ** 2 + dz ** 2) ** 0.5
         if L < 1e-3:
             continue
-        # Offset the label slightly outside the polygon along the edge normal.
-        nx, nz = -dz / L, dx / L
-        offset = 0.18
-        # Rough "outside" sense by checking against the polygon centroid
-        cx = sum(p[0] for p in room) / n
-        cz = sum(p[1] for p in room) / n
-        if (midx - cx) * nx + (midz - cz) * nz < 0:
-            nx, nz = -nx, -nz
-        tx, tz = midx + nx * offset, midz + nz * offset
+        label = format_length(L, units)
+        # Skip labels on edges too short to host them readably.
+        # ~0.025 m of plot data per char at 7pt on the A1 page is a usable
+        # rule of thumb; require the edge to be ≥ 1.5× the label width.
+        est_label_width = 0.025 * len(label)
+        if L < 1.5 * est_label_width:
+            continue
+        # Place the label *on* the edge midpoint — its white bbox cuts the
+        # line, giving the architectural ——[label]—— look.
         angle = 0.0
         try:
             import math as _m
@@ -1493,17 +1911,32 @@ async def api_pdf(session_id: str) -> Response:
                 angle += 180
         except Exception:
             angle = 0.0
-        ax.text(tx, tz, f"{L * 1000:.0f} mm",
+        ax.text(midx, midz, label,
                 ha="center", va="center", rotation=angle,
                 fontsize=7, color="#222",
                 bbox=dict(boxstyle="round,pad=0.15",
                           facecolor="white", edgecolor="#aaa", linewidth=0.4))
 
-    title = f"Reflected Ceiling Plan — session {session_id}"
-    ax.set_title(title, fontsize=10)
+    # ─── North arrow + scale bar (overlays on the plan axes) ──
+    if project.get("print_north", True):
+        _draw_north_arrow(
+            ax, minx, maxx, minz, maxz,
+            north_deg=float(project.get("north_deg", 0.0)),
+        )
+    _draw_scale_bar(ax, minx, maxx, minz, maxz, units=units)
+
+    # ─── Title block (right strip) ──
+    _draw_title_block(
+        title_ax, project=project, session_id=session_id,
+        ortho_path=_session_dir(session_id) / "out" / "ceiling.jpg",
+    )
+
+    # ─── Legends (bottom strip) ──
+    _draw_legends(legend_ax, main=main, regions=regions,
+                  obstructions=plan.get("obstructions", []), units=units)
 
     buf = io.BytesIO()
-    fig.savefig(buf, format="pdf", bbox_inches="tight")
+    fig.savefig(buf, format="pdf")
     plt.close(fig)
     buf.seek(0)
 
@@ -1512,6 +1945,272 @@ async def api_pdf(session_id: str) -> Response:
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="rcp_{session_id}.pdf"'},
     )
+
+
+def _draw_north_arrow(ax, minx, maxx, minz, maxz, *, north_deg: float) -> None:
+    """Top-right corner of the plan axes: 25 mm circle with a triangle
+    pointing along ``north_deg`` (degrees CCW from page-up = +Z)."""
+    from matplotlib.patches import Circle as MplCircle, Polygon as MplPolygon
+    import numpy as _np
+    # Place inset axes proportionally so the arrow doesn't move when the
+    # plan resizes for different rooms.
+    ix = ax.inset_axes([0.86, 0.86, 0.12, 0.12])
+    ix.set_xlim(-1.2, 1.2)
+    ix.set_ylim(-1.2, 1.2)
+    ix.set_aspect("equal")
+    ix.axis("off")
+    theta = _np.deg2rad(90.0 - north_deg)
+    # Outer circle.
+    ix.add_patch(MplCircle((0, 0), 1.0, fill=False, edgecolor="#222",
+                            linewidth=1.2))
+    # Triangle pointing at the north direction.
+    tip = (_np.cos(theta), _np.sin(theta))
+    perp = (-_np.sin(theta) * 0.18, _np.cos(theta) * 0.18)
+    base_back = (-tip[0] * 0.7, -tip[1] * 0.7)
+    pts = [tip, (base_back[0] + perp[0], base_back[1] + perp[1]),
+           (base_back[0] - perp[0], base_back[1] - perp[1])]
+    ix.add_patch(MplPolygon(pts, closed=True, facecolor="#222"))
+    ix.text(tip[0] * 1.15, tip[1] * 1.15, "N",
+            ha="center", va="center", fontsize=9, fontweight="bold",
+            color="#222")
+
+
+def _draw_scale_bar(ax, minx, maxx, minz, maxz, *, units: str) -> None:
+    """Bottom-left of the plan axes: 0 — 1 — 5 — 10 m bar (or 0-1-5-10 ft)."""
+    from matplotlib.patches import Rectangle
+    bar_h_world = (maxz - minz) * 0.012
+    if bar_h_world < 0.06:
+        bar_h_world = 0.06
+    if units == "imperial":
+        marks_units = [0, 1, 5, 10]   # feet
+        unit_to_m = 0.3048
+        unit_label = "ft"
+    else:
+        marks_units = [0, 1, 5, 10]   # metres
+        unit_to_m = 1.0
+        unit_label = "m"
+    total_world = marks_units[-1] * unit_to_m
+
+    # Inset at the bottom-left of the plan axes — 25% of plan width, so
+    # readable across most rooms.
+    plan_w = maxx - minx
+    plan_h = maxz - minz
+    ix = ax.inset_axes([0.02, 0.02, min(0.30, total_world / plan_w * 1.1), 0.06])
+    ix.set_xlim(0, total_world)
+    ix.set_ylim(-bar_h_world * 2, bar_h_world * 2)
+    ix.set_aspect("auto")
+    ix.axis("off")
+
+    # Alternating black/white segments between successive marks.
+    for i in range(len(marks_units) - 1):
+        x0 = marks_units[i] * unit_to_m
+        x1 = marks_units[i + 1] * unit_to_m
+        face = "#222" if i % 2 == 0 else "white"
+        ix.add_patch(Rectangle(
+            (x0, 0), x1 - x0, bar_h_world,
+            facecolor=face, edgecolor="#222", linewidth=0.8,
+        ))
+
+    for m_v in marks_units:
+        x = m_v * unit_to_m
+        ix.plot([x, x], [0, -bar_h_world * 0.7], color="#222", linewidth=0.8)
+        ix.text(x, -bar_h_world * 1.4, f"{m_v}",
+                ha="center", va="top", fontsize=8, color="#222")
+    ix.text(total_world, bar_h_world * 1.3, unit_label,
+            ha="right", va="bottom", fontsize=8, color="#222")
+
+
+def _draw_title_block(title_ax, *, project: dict, session_id: str,
+                       ortho_path: Path) -> None:
+    """Right-side title block: ortho thumbnail, project metadata, and
+    drawing register table."""
+    from matplotlib.patches import Rectangle
+    title_ax.set_xlim(0, 1)
+    title_ax.set_ylim(0, 1)
+    title_ax.axis("off")
+    # Outer frame.
+    title_ax.add_patch(Rectangle((0, 0), 1, 1, fill=False,
+                                  edgecolor="#222", linewidth=1.2))
+
+    # Top: ortho thumbnail.
+    THUMB_TOP = 0.98
+    THUMB_BOTTOM = 0.62
+    title_ax.add_patch(Rectangle(
+        (0.04, THUMB_BOTTOM), 0.92, THUMB_TOP - THUMB_BOTTOM,
+        fill=False, edgecolor="#888", linewidth=0.5,
+    ))
+    try:
+        if ortho_path.exists():
+            import matplotlib.image as mpimg
+            img = mpimg.imread(str(ortho_path))
+            title_ax.imshow(
+                img,
+                extent=(0.04, 0.96, THUMB_BOTTOM, THUMB_TOP),
+                aspect="auto", zorder=1,
+            )
+    except Exception:
+        pass
+    title_ax.text(0.5, THUMB_BOTTOM - 0.015, "REFERENCE — ORTHO VIEW",
+                  ha="center", va="top", fontsize=8, color="#888")
+
+    # Project fields.
+    fields = [
+        ("PROJECT",        project.get("name", "") or "—"),
+        ("ADDRESS",        project.get("address", "") or "—"),
+        ("CLIENT",         project.get("client", "") or "—"),
+        ("COMPANY",        project.get("company", "") or "—"),
+        ("DRAWING NO.",    project.get("drawing_number", "") or "—"),
+    ]
+    field_top = 0.58
+    field_h = 0.04
+    for i, (k, v) in enumerate(fields):
+        y_top = field_top - i * field_h
+        y_bot = y_top - field_h
+        title_ax.add_patch(Rectangle(
+            (0.04, y_bot), 0.92, field_h, fill=False,
+            edgecolor="#bbb", linewidth=0.5,
+        ))
+        title_ax.text(0.06, y_top - 0.005, k,
+                       ha="left", va="top",
+                       fontsize=7, fontweight="bold", color="#888")
+        title_ax.text(0.06, y_bot + 0.008, v,
+                       ha="left", va="bottom",
+                       fontsize=10, color="#222")
+
+    # Drawing register table.
+    reg_top = field_top - len(fields) * field_h - 0.02
+    reg_bot = 0.05
+    title_ax.text(0.04, reg_top + 0.005, "DRAWING REGISTER",
+                  ha="left", va="bottom",
+                  fontsize=7, fontweight="bold", color="#888")
+    cols = [("REV", 0.04, 0.14),
+            ("DATE", 0.14, 0.34),
+            ("BY", 0.34, 0.46),
+            ("NOTE", 0.46, 0.96)]
+    title_ax.add_patch(Rectangle(
+        (0.04, reg_bot), 0.92, reg_top - reg_bot,
+        fill=False, edgecolor="#bbb", linewidth=0.5,
+    ))
+    header_h = 0.025
+    for label, x0, x1 in cols:
+        title_ax.text((x0 + x1) / 2, reg_top - 0.005, label,
+                       ha="center", va="top",
+                       fontsize=7, fontweight="bold", color="#888")
+    register = list(project.get("drawing_register") or [])
+    rows = register[:14]  # whatever fits; rest spills off the page
+    if not rows:
+        title_ax.text(0.5, (reg_top + reg_bot) / 2,
+                       "— no revisions recorded —",
+                       ha="center", va="center",
+                       fontsize=8, color="#aaa", style="italic")
+    else:
+        row_h = (reg_top - reg_bot - header_h) / max(len(rows), 1)
+        for i, row in enumerate(rows):
+            y_top = reg_top - header_h - i * row_h
+            for label, x0, x1 in cols:
+                v = (row.get(label.lower().rstrip(".") if label != "NOTE" else "note", "") or "")
+                title_ax.text(
+                    x0 + 0.005 if label != "REV" else (x0 + x1) / 2,
+                    y_top - 0.005,
+                    str(v),
+                    ha="left" if label != "REV" else "center",
+                    va="top",
+                    fontsize=8, color="#222",
+                )
+
+    title_ax.text(0.5, 0.025,
+                  f"session {session_id}",
+                  ha="center", va="center",
+                  fontsize=6, color="#aaa", style="italic")
+
+
+def _draw_legends(legend_ax, *, main: dict | None, regions: list,
+                  obstructions: list, units: str) -> None:
+    """Bottom strip: ceiling-zone legend (one row per face) + structural
+    legend (column hatch swatch) + services placeholder."""
+    from matplotlib.patches import Rectangle
+    legend_ax.set_xlim(0, 1)
+    legend_ax.set_ylim(0, 1)
+    legend_ax.axis("off")
+    legend_ax.add_patch(Rectangle((0, 0), 1, 1, fill=False,
+                                   edgecolor="#222", linewidth=1.2))
+
+    # Layout: zone column (60%) + structural column (20%) + services column (20%)
+    legend_ax.text(0.005, 0.96, "CEILING ZONES",
+                   ha="left", va="top",
+                   fontsize=8, fontweight="bold", color="#888")
+
+    rows = []
+    if main:
+        rows.append({
+            "tint": main.get("tint", MAIN_TINT),
+            "label": main.get("label", "Main Ceiling (1)"),
+            "rel": format_height_delta(0.0, units),
+            "notes": main.get("notes", ""),
+        })
+    for r in regions:
+        rel = r.get("relative_y")
+        rel_text = "—" if rel is None else format_height_delta(float(rel), units)
+        rows.append({
+            "tint": r.get("tint", "#ff7043"),
+            "label": r.get("label", f"region {r['id']}"),
+            "rel": rel_text,
+            "notes": r.get("notes", ""),
+        })
+
+    # Two columns of zone rows so wide rooms with many zones still fit.
+    col_x = [0.01, 0.31]
+    row_h = 0.10
+    for i, row in enumerate(rows):
+        col = i // 7
+        if col >= 2:
+            break
+        idx = i % 7
+        x = col_x[col]
+        y = 0.86 - idx * row_h
+        legend_ax.add_patch(Rectangle(
+            (x + 0.01, y - 0.04), 0.025, 0.05,
+            facecolor=row["tint"], edgecolor="#222", linewidth=0.5,
+        ))
+        legend_ax.text(x + 0.045, y, f"{row['label']}",
+                       ha="left", va="top", fontsize=8, color="#222")
+        legend_ax.text(x + 0.045, y - 0.025,
+                       f"{row['rel']}{('  ' + row['notes']) if row['notes'] else ''}",
+                       ha="left", va="top", fontsize=7, color="#555")
+
+    # Structural column (columns + future structural callouts).
+    legend_ax.text(0.605, 0.96, "STRUCTURAL",
+                   ha="left", va="top",
+                   fontsize=8, fontweight="bold", color="#888")
+    if obstructions:
+        legend_ax.add_patch(Rectangle(
+            (0.61, 0.78), 0.025, 0.05,
+            facecolor="white", edgecolor="#222", linewidth=0.5,
+            hatch="xx",
+        ))
+        legend_ax.text(0.645, 0.83,
+                       f"Columns ({len(obstructions)})",
+                       ha="left", va="top", fontsize=8, color="#222")
+        legend_ax.text(0.645, 0.81,
+                       "structural negative space",
+                       ha="left", va="top", fontsize=7, color="#555")
+    else:
+        legend_ax.text(0.645, 0.83, "— no columns drawn —",
+                       ha="left", va="top", fontsize=8, color="#aaa",
+                       style="italic")
+
+    # Services placeholder — we'll fill this in once light detection lands.
+    legend_ax.text(0.805, 0.96, "SERVICES",
+                   ha="left", va="top",
+                   fontsize=8, fontweight="bold", color="#888")
+    legend_ax.add_patch(Rectangle(
+        (0.81, 0.05), 0.18, 0.85,
+        fill=False, edgecolor="#bbb", linewidth=0.4,
+    ))
+    legend_ax.text(0.9, 0.475,
+                   "TBD\n(lights, diffusers,\ndownlights…)",
+                   ha="center", va="center",
+                   fontsize=8, color="#aaa", style="italic")
 
 
 # ─── EXPORT ───────────────────────────────────────────────────────────────────
