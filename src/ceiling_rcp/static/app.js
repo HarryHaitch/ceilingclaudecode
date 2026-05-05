@@ -467,7 +467,8 @@ document.getElementById("btn-define").onclick = defineCeilings;
 document.getElementById("btn-unsnap").onclick = unsnapTopology;
 document.getElementById("btn-pdf").onclick = downloadPdf;
 document.getElementById("btn-export").onclick = exportPlan;
-document.getElementById("btn-apply-variance").onclick = applyMaxVariance;
+document.getElementById("btn-apply-min-height").onclick = applyMinCeilingHeight;
+document.getElementById("btn-apply-min-height-imp").onclick = applyMinCeilingHeight;
 document.querySelectorAll(".seg-btn[data-units]").forEach(b => {
   b.onclick = () => setUnits(b.dataset.units);
 });
@@ -955,6 +956,7 @@ async function setUnits(value) {
   }
   state.plan.units = value;
   applyUnitsToggleUI();
+  syncMinHeightUnitsUI();
   refreshPolygonsList();
   // Variance preview, region label info, etc. reflect the new units.
   const sel = state.selection;
@@ -968,12 +970,45 @@ function applyUnitsToggleUI() {
   });
 }
 
-async function applyMaxVariance() {
+function readMinCeilingHeightInputM() {
+  // Returns the user-entered floor height in metres, regardless of
+  // which units toggle is active. Imperial → ft+in is added back into
+  // metres before we hit the server (the server's stored value is
+  // always metric).
+  if (unitsSystem() === "imperial") {
+    const ft = Number.parseFloat(
+      document.getElementById("input-min-height-ft").value);
+    const inch = Number.parseFloat(
+      document.getElementById("input-min-height-in").value);
+    if (!Number.isFinite(ft) || !Number.isFinite(inch)) return NaN;
+    return (ft * 12 + inch) * 0.0254;
+  }
+  return Number.parseFloat(
+    document.getElementById("input-min-height").value);
+}
+
+function writeMinCeilingHeightInputM(metres) {
+  if (!Number.isFinite(metres)) return;
+  document.getElementById("input-min-height").value = metres.toFixed(1);
+  const totalIn = metres * 39.3700787;
+  const ft = Math.floor(totalIn / 12);
+  const inch = Math.round(totalIn - ft * 12);
+  document.getElementById("input-min-height-ft").value = String(ft);
+  document.getElementById("input-min-height-in").value = String(inch);
+}
+
+function syncMinHeightUnitsUI() {
+  // Show the metric or imperial input row based on the current units.
+  const imperial = unitsSystem() === "imperial";
+  document.getElementById("row-min-height-metric").hidden = imperial;
+  document.getElementById("row-min-height-imperial").hidden = !imperial;
+}
+
+async function applyMinCeilingHeight() {
   if (!state.sessionId) return;
-  const inp = document.getElementById("input-max-variance");
-  const v = Number.parseFloat(inp.value);
+  const v = readMinCeilingHeightInputM();
   if (!Number.isFinite(v) || v < 0.5 || v > 6.0) {
-    setBanner("Enter a value between 0.5 and 6.0 m.", true);
+    setBanner("Enter a value between 0.5 and 6.0 m (1'-7\" to 19'-8\").", true);
     return;
   }
   if (state.plan?.topology) {
@@ -983,11 +1018,11 @@ async function applyMaxVariance() {
     );
     if (!ok) return;
   }
-  setBanner("Re-rendering with new ceiling-variance limit…");
+  setBanner("Re-rendering with new minimum ceiling height…");
   const r = await fetch(`/api/sessions/${state.sessionId}/scan_settings`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ max_ceiling_variance_m: v }),
+    body: JSON.stringify({ min_ceiling_height_m: v }),
   });
   if (!r.ok) {
     setBanner("Re-render failed: " + (await r.text()).slice(0, 160), true);
@@ -2486,10 +2521,12 @@ async function loadFromUrlParam() {
     document.getElementById("workflow").hidden = false;
     document.getElementById("right-panel").hidden = false;
     document.getElementById("btn-export").disabled = false;
-    const sv = state.plan?.scan_settings?.max_ceiling_variance_m;
+    const sv = state.plan?.scan_settings?.min_ceiling_height_m
+            ?? state.plan?.scan_settings?.max_ceiling_variance_m;
     if (typeof sv === "number" && Number.isFinite(sv)) {
-      document.getElementById("input-max-variance").value = sv.toFixed(1);
+      writeMinCeilingHeightInputM(sv);
     }
+    syncMinHeightUnitsUI();
     if (!state.plan.units) state.plan.units = "metric";
     applyUnitsToggleUI();
     syncProjectPanel(state.plan.project);

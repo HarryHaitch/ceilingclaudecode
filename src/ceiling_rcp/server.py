@@ -93,7 +93,15 @@ def _migrate_plan(plan: dict[str, Any]) -> dict[str, Any]:
         # v2 → v3: introduces plan["units"], plan["scan_settings"],
         # plan["project"]. All optional with sensible defaults.
         plan.setdefault("units", "metric")
-        plan.setdefault("scan_settings", {"max_ceiling_variance_m": 1.5})
+        plan.setdefault("scan_settings", {"min_ceiling_height_m": 2.0})
+    # H16 rename: scan_settings.max_ceiling_variance_m → min_ceiling_height_m.
+    # Different semantic (absolute floor instead of band-below-top), so we
+    # don't try to convert the old value — replace with the new default.
+    ss = plan.setdefault("scan_settings", {})
+    if "max_ceiling_variance_m" in ss and "min_ceiling_height_m" not in ss:
+        ss["min_ceiling_height_m"] = 2.0
+        ss.pop("max_ceiling_variance_m", None)
+    ss.setdefault("min_ceiling_height_m", 2.0)
     if v < 4:
         # v3 → v4: introduces face-level ``selected_y`` and ``histogram``.
         # Both back-fill lazily from existing stats — selected_y defaults
@@ -234,7 +242,7 @@ def _extract_upload(
 
 # ─── PROCESSING ───────────────────────────────────────────────────────────────
 
-DEFAULT_MAX_CEILING_VARIANCE_M = 1.5
+DEFAULT_MIN_CEILING_HEIGHT_M = 2.0
 
 
 # ─── SCALE LADDERS ────────────────────────────────────────────────────────────
@@ -305,7 +313,7 @@ def _do_render(
     session_id: str,
     *,
     ppm: int,
-    max_ceiling_variance_m: float,
+    min_ceiling_height_m: float,
 ) -> tuple[Any, dict[str, Any], dict[str, Any] | None] | None:
     """Render ceiling.jpg + height.npy for a session.
 
@@ -326,7 +334,7 @@ def _do_render(
     keep = ceiling_face_mask(
         mesh,
         max_tilt_deg=60.0,
-        max_ceiling_variance_m=float(max_ceiling_variance_m),
+        min_ceiling_height_m=float(min_ceiling_height_m),
     )
     keep_idx = np.where(keep)[0]
 
@@ -373,7 +381,7 @@ def process_session(
     session_id: str,
     *,
     ppm: int = 150,
-    max_ceiling_variance_m: float = DEFAULT_MAX_CEILING_VARIANCE_M,
+    min_ceiling_height_m: float = DEFAULT_MIN_CEILING_HEIGHT_M,
 ) -> dict[str, Any]:
     """Initial render — fresh plan, fresh ceiling.jpg + height.npy.
 
@@ -397,7 +405,7 @@ def process_session(
         "topology": None,
         "units": DEFAULT_UNITS,
         "scan_settings": {
-            "max_ceiling_variance_m": float(max_ceiling_variance_m),
+            "min_ceiling_height_m": float(min_ceiling_height_m),
         },
         "project": _default_project(),
     }
@@ -407,7 +415,7 @@ def process_session(
         return plan
 
     result = _do_render(
-        session_id, ppm=ppm, max_ceiling_variance_m=max_ceiling_variance_m,
+        session_id, ppm=ppm, min_ceiling_height_m=min_ceiling_height_m,
     )
     if result is None:
         (out / "plan.json").write_text(json.dumps(plan, indent=2))
@@ -478,15 +486,23 @@ def _analyse_and_pack(
         bbox = (0, 0, 0, 0)
     else:
         vals = sample[valid].astype(np.float64)
+        # 2 % outlier trim — drop the lowest 2 % and the highest 2 % of
+        # pixel heights before computing mean / std / min / max so a
+        # handful of stray pixels at the extremes don't drag the stats
+        # (and the histogram) into a wide range. Coverage metrics
+        # (valid_frac / n_valid_px / n_total_px) stay based on the full
+        # untrimmed sample — they're honesty about how much of the
+        # polygon had LiDAR data.
+        trimmed = _trim_outliers(vals, frac=0.02)
         from .analyse import PolygonAnalysis
         stats = PolygonAnalysis(
-            mean_y=float(vals.mean()),
-            std_y=float(vals.std()),
+            mean_y=float(trimmed.mean()) if trimmed.size else float(vals.mean()),
+            std_y=float(trimmed.std()) if trimmed.size else float(vals.std()),
             valid_frac=float(valid.sum()) / float(n_total),
             n_valid_px=int(valid.sum()),
             n_total_px=n_total,
-            min_y=float(vals.min()),
-            max_y=float(vals.max()),
+            min_y=float(trimmed.min()) if trimmed.size else float(vals.min()),
+            max_y=float(trimmed.max()) if trimmed.size else float(vals.max()),
         )
         png_bytes, bbox = _heatmap_from_mask(
             mask, height_map, mean_y=stats.mean_y,
@@ -511,6 +527,27 @@ def _analyse_and_pack(
 # represents the ceiling-area-vs-height distribution directly.
 HEIGHT_HISTOGRAM_BIN_M = 0.005
 
+# Fraction trimmed from each tail before computing per-face stats and
+# building the histogram. A handful of stray LiDAR pixels at either
+# extreme (e.g. a glint that registered as a single high pixel, a
+# shadow that registered as low) would otherwise stretch min_y/max_y
+# and bury the bulk of the bins in narrow space.
+HEIGHT_TRIM_FRAC = 0.02
+
+
+def _trim_outliers(values: np.ndarray, *, frac: float = HEIGHT_TRIM_FRAC) -> np.ndarray:
+    """Drop the lowest ``frac`` and highest ``frac`` of ``values``.
+    Returns a new (sorted-ish) array; tiny inputs pass through
+    untouched so a face with only 50 valid pixels doesn't get gutted."""
+    if values.size < 50 or frac <= 0:
+        return values
+    n = values.size
+    k = int(round(n * frac))
+    if k <= 0:
+        return values
+    sorted_vals = np.sort(values)
+    return sorted_vals[k : n - k]
+
 
 def _height_histogram(
     height_map: np.ndarray, mask: np.ndarray,
@@ -529,15 +566,24 @@ def _height_histogram(
     valid = sample[~np.isnan(sample)]
     if valid.size == 0:
         return None
-    lo = float(valid.min())
-    hi = float(valid.max())
+    # Trim 2% tails so the histogram axis tracks the bulk of the data
+    # rather than a few stray pixels at the extremes.
+    trimmed = _trim_outliers(valid.astype(np.float64))
+    if trimmed.size == 0:
+        return None
+    lo = float(trimmed.min())
+    hi = float(trimmed.max())
     if hi - lo < bin_w_m:
         # Perfectly flat polygon — single bin, centre on the value.
         edges = [lo - bin_w_m / 2, lo + bin_w_m / 2]
-        counts = [int(valid.size)]
+        counts = [int(trimmed.size)]
     else:
         n_bins = max(2, int(np.ceil((hi - lo) / bin_w_m)))
         edges_arr = np.linspace(lo, hi, n_bins + 1)
+        # np.histogram drops anything outside [lo, hi], which is what we
+        # want — the trim already removed the tails, so binning the
+        # untrimmed array against the trimmed range gives a clean
+        # in-range count without smearing the tails into edge bins.
         counts_arr, _ = np.histogram(valid, bins=edges_arr)
         edges = [float(e) for e in edges_arr]
         counts = [int(c) for c in counts_arr]
@@ -764,7 +810,7 @@ async def api_set_units(session_id: str, payload: dict = Body(...)) -> dict:
 
 @app.put("/api/sessions/{session_id}/scan_settings")
 async def api_set_scan_settings(session_id: str, payload: dict = Body(...)) -> dict:
-    """Update scan-settings (currently just ``max_ceiling_variance_m``) and
+    """Update scan-settings (currently just ``min_ceiling_height_m``) and
     re-render the ortho image + height map.
 
     User-drawn polygons (room, main, regions, obstructions) are preserved —
@@ -773,19 +819,23 @@ async def api_set_scan_settings(session_id: str, payload: dict = Body(...)) -> d
     the user re-snaps when ready.
     """
     plan = _load_plan(session_id)
-    raw = payload.get("max_ceiling_variance_m")
+    # Accept the old key for one cycle of clients-loading-cached-app.js,
+    # but the new key wins if both are present.
+    raw = payload.get("min_ceiling_height_m")
     if raw is None:
-        raise HTTPException(400, "max_ceiling_variance_m required")
+        raw = payload.get("max_ceiling_variance_m")
+    if raw is None:
+        raise HTTPException(400, "min_ceiling_height_m required")
     try:
-        new_var = float(raw)
+        new_h = float(raw)
     except (TypeError, ValueError):
-        raise HTTPException(400, "max_ceiling_variance_m must be numeric")
-    if not (0.5 <= new_var <= 6.0):
-        raise HTTPException(400, "max_ceiling_variance_m must be between 0.5 and 6.0 metres")
+        raise HTTPException(400, "min_ceiling_height_m must be numeric")
+    if not (0.5 <= new_h <= 6.0):
+        raise HTTPException(400, "min_ceiling_height_m must be between 0.5 and 6.0 metres")
 
     ppm = int((plan.get("grid") or {}).get("pixels_per_metre") or 150)
     result = _do_render(
-        session_id, ppm=ppm, max_ceiling_variance_m=new_var,
+        session_id, ppm=ppm, min_ceiling_height_m=new_h,
     )
     if result is None:
         raise HTTPException(400, "scan upload is no longer valid; reprocess from CLI")
@@ -794,7 +844,9 @@ async def api_set_scan_settings(session_id: str, payload: dict = Body(...)) -> d
     plan["grid"] = grid_dict
     if height_summary is not None:
         plan["height_summary"] = height_summary
-    plan.setdefault("scan_settings", {})["max_ceiling_variance_m"] = new_var
+    ss = plan.setdefault("scan_settings", {})
+    ss["min_ceiling_height_m"] = new_h
+    ss.pop("max_ceiling_variance_m", None)
 
     # Refresh per-polygon stats + heatmaps against the new height map.
     if plan.get("room"):

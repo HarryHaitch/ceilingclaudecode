@@ -92,19 +92,29 @@
 
         <h2>2. Scan settings</h2>
         <div class="scan-settings">
-          <label for="input-max-variance">
-            Max ceiling height variance
-            <span class="muted">— floor / furniture deeper than this below the highest ceiling are excluded</span>
+          <label for="input-min-height">
+            Minimum ceiling height
+            <span class="muted">— anything lower than this is dropped from the ortho</span>
           </label>
-          <div class="row">
-            <input type="number" id="input-max-variance"
-                   min="0.5" max="6.0" step="0.1" value="1.5">
+          <div class="row" id="row-min-height-metric">
+            <input type="number" id="input-min-height"
+                   min="0.5" max="6.0" step="0.1" value="2.0">
             <span>m</span>
-            <button id="btn-apply-variance" class="step-btn">Apply &amp; re-render</button>
+            <button id="btn-apply-min-height" class="step-btn">Apply &amp; re-render</button>
           </div>
-          <p class="muted hint" id="variance-hint">
-            1.5 m suits typical 2.4–3 m ceilings. Raise for vaulted /
-            cathedral rooms; lower to aggressively cull furniture.
+          <div class="row" id="row-min-height-imperial" hidden>
+            <input type="number" id="input-min-height-ft"
+                   min="1" max="20" step="1" value="6">
+            <span>ft</span>
+            <input type="number" id="input-min-height-in"
+                   min="0" max="11" step="1" value="7">
+            <span>in</span>
+            <button id="btn-apply-min-height-imp" class="step-btn">Apply &amp; re-render</button>
+          </div>
+          <p class="muted hint" id="min-height-hint">
+            2.0 m (~6'-7") is a safe default — clears typical
+            furniture while keeping door headers. Increase if
+            furniture is still showing up in the ortho.
           </p>
         </div>
 
@@ -175,6 +185,6 @@
     </aside>
   </main>
 
-  <script src="app.js?v=21"></script>
+  <script src="app.js?v=22"></script>
 </body>
 </html>

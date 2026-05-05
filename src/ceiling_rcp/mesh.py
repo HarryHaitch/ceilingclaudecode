@@ -336,7 +336,7 @@ def ceiling_face_mask(
     mesh: "Mesh",
     *,
     max_tilt_deg: float = 60.0,
-    max_ceiling_variance_m: float = 1.5,
+    min_ceiling_height_m: float = 2.0,
 ) -> np.ndarray:
     """Faces that count as *ceiling* — the basis for the ortho image and height map.
 
@@ -346,15 +346,15 @@ def ceiling_face_mask(
        than ``downward_face_mask`` (60° default vs 30°) so tilted bulkhead
        edges, vault flanks, and slightly-noisy LiDAR triangles render
        instead of leaving black holes in the ortho.
-    2. **Ceiling height band** — reject any down-face whose mean Y is more
-       than ``max_ceiling_variance_m`` below the area-weighted 95th-percentile
-       Y of all down-faces. That percentile is a robust "highest ceiling"
-       signal; the band catches couches, table undersides, kitchen-cabinet
-       bottoms — anything below the actual ceiling envelope.
+    2. **Absolute height floor** — reject any down-face whose mean Y is
+       below ``min_ceiling_height_m`` (world-space metres above the
+       reconstruction's floor). Catches couches, table undersides, kitchen-
+       cabinet bottoms — anything that's pointed downward but lives below
+       the user's "this is the ceiling" line.
 
-    For a typical 2.7 m ceiling with default 1.5 m variance, threshold = 1.2 m
-    so couches (≤ 0.5 m world Y) drop out and door headers (~2 m) survive.
-    For double-height / cathedral rooms the user raises the variance.
+    Default 2.0 m clears typical furniture without nibbling into door
+    headers (~2.0 m). Raise it if you still see furniture in the ortho;
+    lower it for unusually low spaces.
     """
     normals = mesh.face_normals()
     threshold_n = -np.cos(np.deg2rad(max_tilt_deg))
@@ -362,22 +362,9 @@ def ceiling_face_mask(
     if not down.any():
         return down
 
-    # Mean Y per down-face triangle, area-weighted — robust to one stray
-    # high triangle dragging the percentile up.
     face_y = mesh.V[mesh.FV[down]][..., 1].mean(axis=1)
-    face_area = mesh.face_areas()[down]
-    sort_idx = np.argsort(face_y)
-    cum_area = np.cumsum(face_area[sort_idx])
-    if cum_area[-1] <= 0:
-        return down
-    target = 0.95 * cum_area[-1]
-    pick = int(np.searchsorted(cum_area, target))
-    pick = min(pick, len(sort_idx) - 1)
-    ceiling_top_y = float(face_y[sort_idx[pick]])
-    threshold_y = ceiling_top_y - float(max_ceiling_variance_m)
-
     keep = down.copy()
-    keep[down] &= face_y >= threshold_y
+    keep[down] &= face_y >= float(min_ceiling_height_m)
     return keep
 
 
