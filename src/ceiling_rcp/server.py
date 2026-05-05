@@ -1206,10 +1206,13 @@ async def api_define_ceilings(session_id: str) -> dict:
 
     # Build the initial line list. Room is index 0; each interface keeps
     # its original index offset so we can track which lines are open
-    # chords and need vertex-snap pre-processing.
+    # chords and need vertex-snap pre-processing. Parallel lists track
+    # the interface that owns each chord-line so we can save the
+    # extended polyline back to plan.interfaces after the noding step.
     lines: list[LineString] = [room_line]
     chord_idx_in_lines: list[int] = []  # indices into `lines`
-    for iface in raw_interfaces:
+    chord_iface_indices: list[int] = []  # parallel: index into raw_interfaces
+    for iface_idx, iface in enumerate(raw_interfaces):
         pts = iface.get("polyline") or []
         if len(pts) < 2:
             continue
@@ -1219,6 +1222,7 @@ async def api_define_ceilings(session_id: str) -> dict:
             lines.append(LineString(list(pts) + [pts[0]]))
         else:
             chord_idx_in_lines.append(len(lines))
+            chord_iface_indices.append(iface_idx)
             lines.append(LineString(pts))
 
     def _insert_vertex(line: LineString, p: Point, tol: float) -> LineString:
@@ -1249,16 +1253,24 @@ async def api_define_ceilings(session_id: str) -> dict:
             + list(coords[best_seg + 1 :])
         )
 
-    # 5 mm — the distance to extend each snapped chord endpoint *past*
+    # 2 cm — the distance to extend each snapped chord endpoint *past*
     # its snap target. Forces a chord-on-line termination to form an
     # X-junction (chord crosses the target line) rather than a
     # T-junction (chord ends exactly on it). polygonize handles
     # X-junctions deterministically; T-junctions can fail to close
     # rings on certain float configurations, which produced the
-    # "sometimes works, sometimes doesn't" intermittency. The 5 mm
-    # overshoot is invisible at any normal zoom and ends up as a
-    # dangling segment that polygonize_full discards.
-    EXTEND_PAST_M = 0.005
+    # "sometimes works, sometimes doesn't" intermittency. We persist
+    # the extended polyline back to plan.interfaces so the canvas
+    # draws a visible "small X" wherever a chord meets another line —
+    # confirms to the user at a glance that the chord truly noded.
+    # 2 cm is large enough to be visible at typical zoom (a few px)
+    # but small enough that the overshoot can't accidentally reach a
+    # different nearby chord. Re-running define on an already-extended
+    # chord doesn't grow it further: the snap pass projects the
+    # existing endpoint back onto the target line and re-extends from
+    # there, so the steady-state is always exactly EXTEND_PAST_M past
+    # the target.
+    EXTEND_PAST_M = 0.02
 
     # For every chord vertex, find the nearest point on any OTHER line
     # within tolerance. Snap the chord vertex to that point AND splice
@@ -1329,6 +1341,15 @@ async def api_define_ceilings(session_id: str) -> dict:
                 deduped.append(p)
         if len(deduped) >= 2 and deduped != list(old_pts):
             lines[ci] = LineString(deduped)
+
+    # Persist the (possibly extended) chord polylines back to
+    # plan.interfaces so the canvas renders the visible "small X"
+    # overshoot. Closed rings are unmodified — they don't get extended.
+    for ci, iface_idx in zip(chord_idx_in_lines, chord_iface_indices):
+        chord_pts = list(lines[ci].coords)
+        raw_interfaces[iface_idx]["polyline"] = [
+            [float(x), float(y)] for x, y in chord_pts
+        ]
 
     # Pairwise crossing-point insertion. unary_union *does* node lines
     # at exact crossings, but float-drift between user clicks can leave
