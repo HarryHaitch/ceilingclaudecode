@@ -1,11 +1,11 @@
 # Status
 
-**Tagged build: `good-wip-3-05052026` (2026-05-05).** Branch
-`claude/admiring-fermi-4b18e7-impl`, based on `good-wip-2-04052026`.
+**Tagged build: `good-wip-4-05052026` (2026-05-05).** Branch
+`claude/admiring-fermi-4b18e7-impl`, based on `good-wip-3-05052026`.
 Read this first when picking the work back up.
 
 **Read-only filesystem snapshot:** `/Users/harishusic/Documents/Claude
-Code/Good WIP 3 05052026/` (chmod a-w, with `repo.bundle` for full git
+Code/Good WIP 4 05052026/` (chmod a-w, with `repo.bundle` for full git
 restore). Don't edit it; it's the rollback point.
 
 ## What's shipped (v0.2)
@@ -480,6 +480,225 @@ sufficient. The same is true of the segmentation lab in `debug/`.
 - **Drawing register row count** still capped at 14 (carried from v2).
 - **Services legend** still a placeholder (carried from v2 — light
   segmentation never started).
+
+## What shipped this session (Good WIP 4 05052026)
+
+Iteration on top of `good-wip-3-05052026` driven by the user's
+20-item punch list (the bug + UX + scan-settings + page-size set
+they sent in this session). Work landed as five cluster commits
+plus follow-ups on `claude/admiring-fermi-4b18e7-impl`:
+
+| Commit | Cluster | Headline |
+|---|---|---|
+| `b8eb603` | E | Bugs: main-face swap + PDF legend swatches |
+| `919cb1b` | F | Interface tracing finish-up (snap, drag, fade) |
+| `5671fdf` | G | Histogram + region-row UX overhaul |
+| `21428ca` | H | Scan-settings rename + 2 % outlier trim |
+| `980128c` | I | Page-size + scale selectors + sheet size in PDF |
+| `ac6fd1b` | F+ | Harden trace snap + define_ceilings noding |
+| `ca8f2fe` | F+ | Show snap indicator while placing the first vertex |
+| `1093b32` | F+ | Make faded interface chords more visible |
+| `96cf971` | F+ | define_ceilings: pairwise crossing + diagnostics |
+| `111d344` | F+ | define_ceilings: extend snapped endpoints past target |
+| `674978e` | F+ | define_ceilings: 2 cm visible-X overshoot, persisted |
+
+### Cluster E — bugs
+
+- **E1: Main-face swap.** Was reverting silently. Root cause: the
+  topology branch in `api_swap_main_face` dropped the topology and
+  re-snapped, but `api_snap`'s stage-1 region Voronoi let the
+  previously-large main (now a region drawn polygon) overwrite
+  every pixel of the small new main, so face id 0 ended with zero
+  coverage and api_snap raised 409. Fix: post-snap, swap is now a
+  metadata-only relabel — the vertices, edges and rings stay; only
+  `kind`/`region_id`/`label`/`tint` flip on the two affected faces,
+  and `plan.main_face_id` moves to the new main.
+  `_refresh_topology_polygons` honours `main_face_id` to render the
+  new roles. `api_snap` stamps `kind=main/region` on every face and
+  resets `main_face_id=0` for fresh snaps. Frontend
+  (`dragRingFor`, `rederiveFacePolygons`, `pushTintForKey`) uses
+  `state.plan.main_face_id` everywhere it was assuming face id 0
+  was main. `pushMainFace` shows a "Datum swapped" banner.
+- **E2: PDF legend swatches were too vibrant.** New module-level
+  `PLAN_FILL_ALPHA = 0.45` and `_muted_fill(hex)` helper pre-blend
+  each tint with white at the same alpha. `_draw_legends` uses the
+  muted RGB triple for the swatch facecolor so the eye reads
+  "this swatch = this fill".
+
+### Cluster F — interface tracing finish-up
+
+- **F3: Live cursor snap to nearby room/interface geometry.** New
+  `snapToNearestExisting` folds vertices, midpoints AND
+  segment-foot projections (perpendicular onto each segment) into
+  a candidate list — so the cursor locks onto a chord or wall
+  *anywhere along it*, not just at vertices. Vertex/midpoint
+  candidates get a 0.85× distance bias so corners win ties. Snap
+  radius 14 px. New `applyTraceSnap` is the single entry point the
+  trace tool reads from: Shift held → `constrainShiftSnap` (ortho
+  lock); not held → `snapToNearestExisting`. Wired into
+  `onMouseDown`'s draw branch, `onMouseMove`'s draw-mode preview,
+  and the Shift keydown/keyup re-snap. Green ring renders around
+  the cursor when locked onto a target — including for the very
+  first vertex (drawDraft was previously skipped on empty drafts,
+  so vertex 1 had no feedback).
+- **F4: Server-side noding hardened.** Three layers:
+  1. Per-vertex snap: every chord vertex (endpoints AND interior)
+     projects onto the nearest point on any other line within
+     `NODE_TOL_M = 0.20 m`. Snap point is also spliced into the
+     target line as a new vertex via `_insert_vertex`, so
+     `unary_union` sees an exact intersection rather than a
+     near-miss.
+  2. Pairwise crossing-point insertion: for every line pair, the
+     geometric `intersection` is computed and each crossing point
+     is spliced into both lines. Catches X-junction near-misses
+     that float-drift would otherwise let `unary_union` silently
+     ignore.
+  3. **Endpoint overshoot**: when a chord endpoint snaps to a
+     target line, the actual endpoint extends 2 cm past the target
+     in the chord direction. This forces the geometry into an
+     X-junction (chord crosses target) rather than a T-junction
+     (chord ends exactly on target). polygonize handles
+     X-junctions deterministically; T-junctions can fail to close
+     rings on certain float configurations, which produced the
+     "sometimes works, sometimes doesn't" intermittency the user
+     reported. The 2 cm overshoot is persisted back to
+     `plan.interfaces[i].polyline` so the canvas renders a small
+     visible X — visual confirmation that the chord truly noded.
+     Steady-state: the overshoot doesn't grow on re-define
+     because the snap pass projects the existing endpoint back
+     onto the target line first.
+  4. Final `shapely.ops.snap(merged, merged, NODE_TOL_M / 2)`
+     pass collapses any sub-tolerance float drift before
+     polygonize.
+- **F5: define_ceilings dangle diagnostics.** Switched
+  `polygonize` → `polygonize_full` so dangling segments come back
+  separately. The response carries `last_define_diagnostic` with
+  `input_chord_count`, `input_closed_count`, `polygons_raw`,
+  `polygons_after_filter`, `dangling_segments`, plus up to 8
+  sample dangle endpoints. Frontend logs the diagnostic to the
+  console on every Define and shows a warning banner when faces
+  produced is fewer than expected.
+- **F6: Interface vertex drag post-trace.** `polygonForKey`,
+  `findHoveredVertex`, and `hitTest` learn about `"interface:N"`
+  keys. Interfaces are checked BEFORE the topology branch in
+  `findHoveredVertex` so a chord vertex coincident with a topology
+  junction still drags as the chord. `onMouseDown` skips the
+  topology-vertex resolve for interface drags so they stay scoped.
+  `pushPolygonForKey` PUTs to `/interface/{id}` and adopts the
+  response. Server-side: `api_update_interface` auto-runs
+  `api_define_ceilings` when a topology already exists.
+  `deleteHoveredVertex` uses min-2 for open chords, min-3 elsewhere.
+- **F7: Hide consumed interface chords after Define.** Once a
+  topology exists, `drawInterface` fades unselected chords to 70%
+  alpha with a 6/4 dashed stroke and hides their vertex dots — the
+  topology renderer already strokes the real face outline. Selecting
+  the chord's row in the Regions panel un-fades it for vertex drag
+  / hover-delete.
+
+### Cluster G — histogram + region-row UX
+
+- **G8** Notes input above the histogram.
+- **G9** Histogram doubled in height (40 → 80 px).
+- **G10** Slider readout in millimetres relative to the main
+  ceiling — main is always 0; regions are +/- mm
+  (`formatHeightDelta` goes imperial automatically).
+- **G11** Axis labels reframed as offsets from `main.selected_y`:
+  min on the left, max on the right, `0` in the middle when the
+  datum falls inside the face's histogram range.
+- **G12** Peak frequency shown as a number above the bars
+  (`peak X.Y%`).
+- **G13** `↓ N%` on the left and `M% ↑` on the right of the
+  marker — recomputed live as the slider drags.
+- **G14** Pink/black checker overlay. New endpoint
+  `GET /face_below?key=<key>&y=<value>` returns an RGBA PNG sized
+  to the face's bbox; pixels with Y < value render as a 4-px
+  pink/black checker. Bbox carried in the X-Bbox header. Slider
+  drag fetches it on every tick (one-in-flight throttling), the
+  canvas draws it on top of the heatmap. Cleared on mouseup.
+- **G15** Two-line `Height: / Spread:` row label with right-aligned
+  values in a CSS grid so numbers line up regardless of sign.
+
+### Cluster H — scan settings + outlier trim
+
+- **H16** "Max ceiling height variance" → "Minimum ceiling height".
+  `ceiling_face_mask` now filters by absolute world-Y threshold
+  (was `top - variance`); raising the value reliably clips
+  furniture (used to do the opposite). Default 2.0 m, range
+  0.5–6.0 m. Imperial (ft + in) input mode appears when the units
+  toggle is set to imperial; the value still round-trips as metres
+  on the wire. Migration drops `max_ceiling_variance_m` and
+  back-fills `min_ceiling_height_m: 2.0` (different semantic, no
+  auto-conversion).
+- **H17** 2 % tail trim. New `_trim_outliers(values, frac=0.02)`
+  drops the lowest 2 % and highest 2 % of in-mask pixel heights
+  before computing mean/std/min/max and before deriving histogram
+  bin edges. Coverage metrics (`valid_frac`, `n_valid_px`,
+  `n_total_px`) stay based on the full untrimmed sample.
+
+### Cluster I — page-size + scale selectors + PDF sheet size
+
+- **I18** Page-size dropdown in the Project info panel — eleven
+  options grouped Metric (A4–A0) / Imperial (Letter, Tabloid,
+  Arch B–E). Default A1. New `PAGE_SIZES` table replaces the
+  hardcoded A1 figsize in `api_pdf`; default Arch D when units
+  are imperial via `_resolve_page_size`.
+- **I19** Scale-override dropdown. Default "Auto" runs the
+  existing `_choose_standard_scale`; manual options cover both
+  ladders. Stored as `plan.project.scale_override` (None = auto).
+- **I20** Sheet-size sub-line in the title-block SCALE section
+  (e.g. `A1 (841 × 594 mm)` or `Arch D (36" × 24")`).
+- `api_set_project` accepts the new `page_size` and
+  `scale_override` fields with validation.
+
+### Schema progression this session
+
+- v5 (carried) → v5 with additive defaults: `project.page_size`,
+  `project.scale_override`, `scan_settings.min_ceiling_height_m`.
+- `face.kind = "main" | "region"` now stamped on every topology
+  face (was missing in WIP 3).
+- Old plans migrate transparently — `_migrate_plan` pops the
+  legacy `max_ceiling_variance_m` and seeds the new defaults.
+
+### Files most touched
+
+| File | Cluster(s) |
+|---|---|
+| `src/ceiling_rcp/server.py` | E, F, G, H, I |
+| `src/ceiling_rcp/static/app.js` | E, F, G, H, I |
+| `src/ceiling_rcp/static/index.html` | F, G, H, I |
+| `src/ceiling_rcp/static/style.css` | G, I |
+| `src/ceiling_rcp/mesh.py` | H (signature change) |
+
+### Cache versions
+
+- `app.js?v=18` → `app.js?v=26`
+- `style.css?v=17` → `style.css?v=20`
+
+### Verification
+
+- `define_ceilings` exercised against simulated trace data via the
+  dangle diagnostic (`polygons_after_filter` matches
+  `1 + chord_count + closed_count` for every test pattern, with
+  `dangling_segments == endpoint_overshoots`).
+- Main-face swap round-tripped on snapped session
+  `0beced53c9df`: face id changes, polygon shapes preserved,
+  every region's `relative_y` recomputes against the new datum.
+- PDF rendered for A1 metric (1:50), Arch D imperial (1:48), and
+  A3 metric (1:100) at every cluster boundary; legend swatches
+  visually match the plan fills.
+- All static assets bumped (`app.js?v=26`, `style.css?v=20`).
+
+### Known v4 limits
+
+- **No imperial unit on the histogram axis tail labels** when the
+  trim leaves the range under 1 mm — formatHeightDelta returns
+  "0 mm" / "0\"" which is informative but not pretty.
+- **Drawing register row count** still capped at 14 (carried from
+  v2).
+- **Services legend** still a placeholder (carried from v2 — light
+  segmentation never started).
+- **Numbered column references (C1 / C2 / …)** still on the
+  backlog.
 
 ## Next session priorities
 
