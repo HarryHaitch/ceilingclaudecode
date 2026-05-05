@@ -1249,14 +1249,27 @@ async def api_define_ceilings(session_id: str) -> dict:
             + list(coords[best_seg + 1 :])
         )
 
+    # 5 mm — the distance to extend each snapped chord endpoint *past*
+    # its snap target. Forces a chord-on-line termination to form an
+    # X-junction (chord crosses the target line) rather than a
+    # T-junction (chord ends exactly on it). polygonize handles
+    # X-junctions deterministically; T-junctions can fail to close
+    # rings on certain float configurations, which produced the
+    # "sometimes works, sometimes doesn't" intermittency. The 5 mm
+    # overshoot is invisible at any normal zoom and ends up as a
+    # dangling segment that polygonize_full discards.
+    EXTEND_PAST_M = 0.005
+
     # For every chord vertex, find the nearest point on any OTHER line
     # within tolerance. Snap the chord vertex to that point AND splice
-    # the point into the target line as a new vertex. Mutates `lines`
-    # in place.
+    # the point into the target line as a new vertex. For ENDPOINTS
+    # that snap, extend EXTEND_PAST_M further along the chord so the
+    # crossing is unambiguous. Mutates `lines` in place.
     for ci in chord_idx_in_lines:
         chord = lines[ci]
         old_pts = list(chord.coords)
         new_pts: list[tuple[float, float]] = list(old_pts)
+        n_old = len(old_pts)
         for k, (vx, vz) in enumerate(old_pts):
             ep = Point(vx, vz)
             best_target_xy: tuple[float, float] | None = None
@@ -1276,10 +1289,31 @@ async def api_define_ceilings(session_id: str) -> dict:
                     best_target_xy = (float(proj_pt.x), float(proj_pt.y))
                     best_target_line_idx = j
             if best_target_xy is not None:
-                new_pts[k] = best_target_xy
+                tx, ty = best_target_xy
+                is_endpoint = (k == 0 or k == n_old - 1)
+                if is_endpoint and n_old >= 2:
+                    # Direction from inner-neighbour to target. Extending
+                    # the endpoint past the target along this direction
+                    # turns the T-junction into a cross.
+                    nx, ny = old_pts[1] if k == 0 else old_pts[-2]
+                    dx = tx - nx
+                    dy = ty - ny
+                    L = (dx * dx + dy * dy) ** 0.5
+                    if L > 1e-9:
+                        ux = dx / L
+                        uy = dy / L
+                        new_pts[k] = (tx + ux * EXTEND_PAST_M,
+                                      ty + uy * EXTEND_PAST_M)
+                    else:
+                        new_pts[k] = (tx, ty)
+                else:
+                    new_pts[k] = (tx, ty)
+                # Splice the *target* point (not the extended endpoint)
+                # onto the target line. That's the geometric crossing
+                # the chord passes through.
                 lines[best_target_line_idx] = _insert_vertex(
                     lines[best_target_line_idx],
-                    Point(*best_target_xy),
+                    Point(tx, ty),
                     NODE_TOL_M,
                 )
         # Drop accidental duplicate consecutive vertices created by the
