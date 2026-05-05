@@ -226,48 +226,83 @@ function constrainShiftSnap(x, z) {
   return snapAlongOrPerp(x, z, b, [b[0] - a[0], b[1] - a[1]]);
 }
 
-// Snap radius for "snap to nearest existing room/interface vertex or
-// midpoint", in canvas pixels. The standard close-loop check uses 12
-// px; 14 here gives a slightly more forgiving target for endpoints
-// without colliding with the close-loop bias on the first vertex.
+// Snap radius for "snap to nearest existing room/interface" geometry,
+// in canvas pixels. The close-loop check uses 12 px; 14 here is the
+// equivalent radius for snapping to a vertex / midpoint / segment.
 const SNAP_TO_EXISTING_PX = 14;
 
 function snapToNearestExisting(x, z) {
-  // Returns [sx, sz] of the nearest room-outline / interface vertex /
-  // midpoint within SNAP_TO_EXISTING_PX of canvas distance, else null.
-  // Caller skips this when Shift is held — Shift is the override that
-  // re-routes to the constrainShiftSnap ortho-lock path. The vertex of
-  // the in-progress draft is intentionally excluded so the close-loop
-  // first-vertex check still gets to act on its tighter 12 px bias.
+  // Returns [sx, sz] of the nearest snap target (vertex, midpoint, or
+  // any point along a room or interface segment) within
+  // SNAP_TO_EXISTING_PX of canvas distance, else null. Caller skips
+  // this when Shift is held — Shift is the override that re-routes to
+  // the constrainShiftSnap ortho-lock path.
+  //
+  // Vertices and midpoints get a small bias factor (multiplied
+  // distance) so they win ties against generic segment-projection
+  // snaps — the user's cursor near a corner should grab the corner,
+  // not a slightly-closer point on the wall passing through it.
   if (!state.plan) return null;
-  const targets = [];
+
+  const cur = worldToImg(x, z);
+  let bestD = SNAP_TO_EXISTING_PX;
+  let bestPt = null;
+  const VERTEX_BIAS = 0.85;  // sub-1 = corners win ties
+
+  function consider(tx, tz, bias) {
+    const t = worldToImg(tx, tz);
+    const d = Math.hypot(t.u - cur.u, t.v - cur.v) * state.view.scale * bias;
+    if (d < bestD) { bestD = d; bestPt = [tx, tz]; }
+  }
+  function considerSegment(a, b) {
+    // Project the cursor onto the segment (a → b) in image space,
+    // clamp to [0, 1], and use the foot as a snap candidate. Lets
+    // the user click ANYWHERE along a chord and have the click
+    // land exactly on the chord — without this, a chord that ends
+    // partway across the room is invisible to snap except at its
+    // two vertices and one midpoint.
+    const ai = worldToImg(a[0], a[1]);
+    const bi = worldToImg(b[0], b[1]);
+    const dx = bi.u - ai.u;
+    const dz = bi.v - ai.v;
+    const len2 = dx * dx + dz * dz;
+    if (len2 < 1e-9) return;
+    let t = ((cur.u - ai.u) * dx + (cur.v - ai.v) * dz) / len2;
+    t = Math.max(0, Math.min(1, t));
+    const fu = ai.u + t * dx;
+    const fv = ai.v + t * dz;
+    const d = Math.hypot(fu - cur.u, fv - cur.v) * state.view.scale;
+    if (d < bestD) {
+      bestD = d;
+      // Linear interp in world space — image and world both linear,
+      // so the projection's `t` is the same in either basis.
+      bestPt = [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
+    }
+  }
+
   const room = state.plan.room || [];
   const n = room.length;
   for (let i = 0; i < n; i++) {
-    targets.push(room[i]);
-    const next = room[(i + 1) % n];
-    targets.push([(room[i][0] + next[0]) / 2, (room[i][1] + next[1]) / 2]);
+    const cur_v = room[i];
+    const next_v = room[(i + 1) % n];
+    consider(cur_v[0], cur_v[1], VERTEX_BIAS);
+    consider((cur_v[0] + next_v[0]) / 2, (cur_v[1] + next_v[1]) / 2, VERTEX_BIAS);
+    considerSegment(cur_v, next_v);
   }
   for (const iface of state.plan.interfaces || []) {
     const line = iface.polyline || [];
     const m = line.length;
     if (m < 2) continue;
-    for (let i = 0; i < m; i++) targets.push(line[i]);
+    for (let i = 0; i < m; i++) {
+      consider(line[i][0], line[i][1], VERTEX_BIAS);
+    }
     const stop = iface.closed ? m : m - 1;
     for (let i = 0; i < stop; i++) {
       const a = line[i];
       const b = line[(i + 1) % m];
-      targets.push([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
+      consider((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, VERTEX_BIAS);
+      considerSegment(a, b);
     }
-  }
-  if (!targets.length) return null;
-  const cur = worldToImg(x, z);
-  let bestD = SNAP_TO_EXISTING_PX;
-  let bestPt = null;
-  for (const [tx, tz] of targets) {
-    const t = worldToImg(tx, tz);
-    const d = Math.hypot(t.u - cur.u, t.v - cur.v) * state.view.scale;
-    if (d < bestD) { bestD = d; bestPt = [tx, tz]; }
   }
   return bestPt;
 }

@@ -1177,86 +1177,134 @@ async def api_define_ceilings(session_id: str) -> dict:
     The user picks which face is the ceiling datum afterwards via
     ``PUT /main_face`` — the largest face is just a sensible default.
 
-    Belt-and-braces for the cursor-snap during tracing: every open
-    chord's two endpoints get extended onto the nearest point on the
-    union of all *other* lines (room outline + every other interface),
-    if that nearest point is within ``END_EXTENSION_TOL_M``. This
-    rescues chords whose endpoints land 1-5 mm shy of an existing line
-    — those wouldn't share a common vertex with anything in
-    ``unary_union``, so ``polygonize`` would silently leave the chord
-    dangling rather than cut a face out of the room."""
+    Robust noding: every open chord's vertices (endpoints AND interior
+    points) are projected onto the nearest point on any *other* line
+    within ``NODE_TOL_M``. When a chord vertex snaps to a target line's
+    interior, we also splice that point into the target line as a new
+    vertex — so ``unary_union`` sees an exact intersection rather than
+    a "close enough" near-miss that ``polygonize`` would silently drop.
+    A final ``shapely.ops.snap`` pass on the merged geometry catches any
+    floating-point drift that escaped the per-vertex snap."""
     from shapely.geometry import LineString, Polygon, Point
-    from shapely.ops import unary_union, polygonize, nearest_points
+    from shapely.ops import unary_union, polygonize, snap as shapely_snap
 
     plan = _load_plan(session_id)
     room_pts = plan.get("room")
     if not room_pts or len(room_pts) < 3:
         raise HTTPException(400, "room outline required before defining ceilings")
 
-    END_EXTENSION_TOL_M = 0.05  # 5 cm — generous on top of the 14 px live snap
+    # 20 cm — large enough to rescue chords drawn freehand without the
+    # live cursor snap, small enough that it can't grab the wrong target
+    # in any normal-sized room. The live snap (app.js
+    # snapToNearestExisting) is the precision tool; this is the safety
+    # net for sloppy traces.
+    NODE_TOL_M = 0.20
 
     raw_interfaces = list(plan.get("interfaces", []))
     room_ring = list(room_pts) + [room_pts[0]]
     room_line = LineString(room_ring)
 
-    # Pre-build LineStrings for every interface (or None for those too
-    # short to use), so the per-chord "every other line" union is just a
-    # filter rather than re-parsing.
-    iface_lines: list[LineString | None] = []
+    # Build the initial line list. Room is index 0; each interface keeps
+    # its original index offset so we can track which lines are open
+    # chords and need vertex-snap pre-processing.
+    lines: list[LineString] = [room_line]
+    chord_idx_in_lines: list[int] = []  # indices into `lines`
     for iface in raw_interfaces:
         pts = iface.get("polyline") or []
         if len(pts) < 2:
-            iface_lines.append(None)
             continue
         if iface.get("closed"):
             if len(pts) < 3:
-                iface_lines.append(None)
                 continue
-            iface_lines.append(LineString(list(pts) + [pts[0]]))
+            lines.append(LineString(list(pts) + [pts[0]]))
         else:
-            iface_lines.append(LineString(pts))
+            chord_idx_in_lines.append(len(lines))
+            lines.append(LineString(pts))
 
-    # End-extend each open chord. Closed rings don't have endpoints to
-    # extend — they already close back to themselves.
-    snapped_endpoints: list[list[list[float]] | None] = []
-    for i, iface in enumerate(raw_interfaces):
-        if iface_lines[i] is None or iface.get("closed"):
-            snapped_endpoints.append(None)
-            continue
-        pts = list(iface.get("polyline") or [])
-        if len(pts) < 2:
-            snapped_endpoints.append(None)
-            continue
-        others = [room_line] + [
-            ln for j, ln in enumerate(iface_lines)
-            if j != i and ln is not None
-        ]
-        union = unary_union(others)
-        new_pts = [list(p) for p in pts]
-        for k in (0, -1):
-            ep = Point(new_pts[k])
-            try:
-                target, _ = nearest_points(union, ep)
-            except Exception:
-                continue
-            if ep.distance(target) <= END_EXTENSION_TOL_M:
-                new_pts[k] = [float(target.x), float(target.y)]
-        snapped_endpoints.append(new_pts)
+    def _insert_vertex(line: LineString, p: Point, tol: float) -> LineString:
+        """Splice ``p`` into ``line`` as a new vertex on the closest
+        segment if within ``tol``. No-op if the point coincides with
+        an existing vertex (within float precision)."""
+        coords = list(line.coords)
+        best_seg = -1
+        best_d = tol
+        for i in range(len(coords) - 1):
+            seg = LineString([coords[i], coords[i + 1]])
+            d = seg.distance(p)
+            if d < best_d:
+                best_d = d
+                best_seg = i
+        if best_seg < 0:
+            return line
+        px, py = float(p.x), float(p.y)
+        a = coords[best_seg]
+        b = coords[best_seg + 1]
+        if abs(a[0] - px) < 1e-9 and abs(a[1] - py) < 1e-9:
+            return line
+        if abs(b[0] - px) < 1e-9 and abs(b[1] - py) < 1e-9:
+            return line
+        return LineString(
+            list(coords[: best_seg + 1])
+            + [(px, py)]
+            + list(coords[best_seg + 1 :])
+        )
 
-    # Build the final linework using the (possibly extended) chord pts.
-    lines: list[LineString] = [room_line]
-    for i, iface in enumerate(raw_interfaces):
-        if iface_lines[i] is None:
-            continue
-        if iface.get("closed"):
-            lines.append(iface_lines[i])
-            continue
-        pts = snapped_endpoints[i] or list(iface.get("polyline") or [])
-        if len(pts) < 2:
-            continue
-        lines.append(LineString(pts))
+    # For every chord vertex, find the nearest point on any OTHER line
+    # within tolerance. Snap the chord vertex to that point AND splice
+    # the point into the target line as a new vertex. Mutates `lines`
+    # in place.
+    for ci in chord_idx_in_lines:
+        chord = lines[ci]
+        old_pts = list(chord.coords)
+        new_pts: list[tuple[float, float]] = list(old_pts)
+        for k, (vx, vz) in enumerate(old_pts):
+            ep = Point(vx, vz)
+            best_target_xy: tuple[float, float] | None = None
+            best_target_line_idx = -1
+            best_d = NODE_TOL_M
+            for j, other in enumerate(lines):
+                if j == ci or other is None:
+                    continue
+                try:
+                    proj_dist = other.project(ep)
+                    proj_pt = other.interpolate(proj_dist)
+                except Exception:
+                    continue
+                d = ep.distance(proj_pt)
+                if d < best_d:
+                    best_d = d
+                    best_target_xy = (float(proj_pt.x), float(proj_pt.y))
+                    best_target_line_idx = j
+            if best_target_xy is not None:
+                new_pts[k] = best_target_xy
+                lines[best_target_line_idx] = _insert_vertex(
+                    lines[best_target_line_idx],
+                    Point(*best_target_xy),
+                    NODE_TOL_M,
+                )
+        # Drop accidental duplicate consecutive vertices created by the
+        # snap (e.g. two chord vertices that both projected onto the
+        # same point on the room line). LineString tolerates duplicates
+        # but they confuse polygonize.
+        deduped: list[tuple[float, float]] = []
+        for p in new_pts:
+            if not deduped or (
+                abs(deduped[-1][0] - p[0]) > 1e-9
+                or abs(deduped[-1][1] - p[1]) > 1e-9
+            ):
+                deduped.append(p)
+        if len(deduped) >= 2 and deduped != list(old_pts):
+            lines[ci] = LineString(deduped)
 
     merged = unary_union(lines)
+    # Final tolerance pass. shapely.ops.snap aligns close vertices to a
+    # common position so any float-drift from the rebuild step doesn't
+    # leave a 1e-12 gap between coincident points.
+    try:
+        merged = shapely_snap(merged, merged, NODE_TOL_M * 0.5)
+        merged = unary_union(merged)
+    except Exception:
+        pass
     polys = list(polygonize(merged))
 
     # Keep only polygons of meaningful area whose representative point
