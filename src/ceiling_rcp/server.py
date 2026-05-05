@@ -587,6 +587,45 @@ def _heatmap_from_mask(
     return buf.tobytes(), (x0, y0, x1, y1)
 
 
+def _below_overlay_from_mask(
+    mask: np.ndarray, height_map: np.ndarray, *, threshold_y: float,
+) -> tuple[bytes, tuple[int, int, int, int]]:
+    """Return an RGBA PNG sized to the mask's bbox where pixels in the
+    mask AND with Y < ``threshold_y`` render as a 4-px pink/black
+    checker, everything else transparent. The histogram slider hits
+    this on every drag tick so the user sees what would be excluded if
+    they pick the marker's current position as the face's height."""
+    if not mask.any():
+        return b"", (0, 0, 0, 0)
+    ys, xs = np.where(mask)
+    x0, x1 = int(xs.min()), int(xs.max()) + 1
+    y0, y1 = int(ys.min()), int(ys.max()) + 1
+    sub_mask = mask[y0:y1, x0:x1]
+    sub_height = height_map[y0:y1, x0:x1]
+    valid = sub_mask & ~np.isnan(sub_height)
+    below = valid & (sub_height < threshold_y)
+    if not below.any():
+        return b"", (x0, y0, x1, y1)
+
+    h, w = below.shape
+    yy, xx = np.indices((h, w))
+    checker = ((yy // 4) + (xx // 4)) % 2 == 0  # 4-px squares
+    pink = (236, 71, 167)   # #ec47a7 — saturated, hard to confuse with any tint
+    black = (10, 10, 10)
+    rgba = np.zeros((h, w, 4), dtype=np.uint8)
+    pick = below & checker
+    fall = below & ~checker
+    rgba[..., 0] = np.where(pick, pink[0], np.where(fall, black[0], 0))
+    rgba[..., 1] = np.where(pick, pink[1], np.where(fall, black[1], 0))
+    rgba[..., 2] = np.where(pick, pink[2], np.where(fall, black[2], 0))
+    rgba[..., 3] = (below * 220).astype(np.uint8)
+    rgba_bgra = rgba[..., [2, 1, 0, 3]]
+    ok, buf = cv2.imencode(".png", rgba_bgra)
+    if not ok:
+        return b"", (x0, y0, x1, y1)
+    return buf.tobytes(), (x0, y0, x1, y1)
+
+
 # Stable palette used both for the colour stripe in the polygon list and
 # as the heatmap tint passed back into _analyse_and_pack.
 MAIN_TINT = "#80cbc4"
@@ -1462,6 +1501,64 @@ async def api_region_selected_y(
     _recompute_relatives(plan)
     _save_plan(session_id, plan)
     return {"ok": True, "region": target}
+
+
+@app.get("/api/sessions/{session_id}/face_below")
+async def api_face_below_overlay(
+    session_id: str, key: str, y: float,
+) -> Response:
+    """Return a PNG overlay (RGBA) sized to the named face's bbox,
+    rendering pixels with Y < ``y`` as a pink/black 4-px checker.
+
+    The histogram slider hits this on every drag tick to preview which
+    pixels would be excluded if the user committed the marker's
+    position as the face's height. ``key`` is ``"main"`` or
+    ``"region:<id>"``. The PNG's bbox in pixel coordinates is returned
+    in the ``X-Bbox`` header as ``"x0,y0,x1,y1"`` so the canvas can
+    composite it at the right place."""
+    from .analyse import polygon_to_mask
+    plan = _load_plan(session_id)
+    if key == "main":
+        face_data = plan.get("main")
+    elif key.startswith("region:"):
+        try:
+            rid = int(key.split(":", 1)[1])
+        except (ValueError, IndexError):
+            raise HTTPException(400, f"bad face key {key!r}")
+        face_data = next(
+            (r for r in plan.get("regions", []) if r["id"] == rid), None,
+        )
+    else:
+        raise HTTPException(400, f"key must be 'main' or 'region:<id>'")
+    if face_data is None:
+        raise HTTPException(404, f"unknown face {key!r}")
+    poly = face_data.get("polygon") or []
+    if len(poly) < 3:
+        raise HTTPException(400, "face has no polygon")
+
+    height_map, grid = _load_height_map(session_id)
+    mask = polygon_to_mask([tuple(p) for p in poly], grid) > 0
+    for hole in (face_data.get("holes_polygons") or []):
+        if len(hole) >= 3:
+            mask &= ~(polygon_to_mask([tuple(p) for p in hole], grid) > 0)
+
+    png_bytes, bbox = _below_overlay_from_mask(
+        mask, height_map, threshold_y=float(y),
+    )
+    headers = {
+        "X-Bbox": f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}",
+        "Cache-Control": "no-store",
+    }
+    if not png_bytes:
+        # No pixels below threshold — return a 1×1 transparent PNG so
+        # the client doesn't have to special-case 404s in the drag loop.
+        ok, buf = cv2.imencode(
+            ".png", np.zeros((1, 1, 4), dtype=np.uint8),
+        )
+        png_bytes = buf.tobytes() if ok else b""
+    return Response(
+        content=png_bytes, media_type="image/png", headers=headers,
+    )
 
 
 def _mirror_selected_y_to_topology(

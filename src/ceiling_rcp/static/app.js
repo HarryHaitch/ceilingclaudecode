@@ -423,6 +423,10 @@ const state = {
   hover: { world: null, vertex: null, snapped: false },
   // Map of { kind: "room"|"main"|"region:N" → ImageBitmap } for heatmaps
   heatmaps: new Map(),
+  // While the histogram slider is being dragged, holds the
+  // pink/black checker overlay returned by /face_below as
+  // {key, threshold, bm, bbox}. Cleared on mouseup.
+  belowOverlay: null,
 };
 
 // ─── DOM ──────────────────────────────────────────────────────────────────
@@ -1088,6 +1092,26 @@ async function downloadPdf() {
 }
 
 // ─── POLYGON LIST ─────────────────────────────────────────────────────────
+function ceilingMetaHtml(face, isMain) {
+  // Two-line meta for ceiling rows. addRow wraps this in
+  // <div class="meta meta-grid">; the grid (right-aligned values)
+  // makes "Height: +12 mm" line up under "Spread:  23 mm" without
+  // hand-tuned spacing.
+  const stats = face?.stats || {};
+  let heightVal;
+  if (isMain) {
+    heightVal = formatHeightDelta(0);
+  } else {
+    const rel = face?.relative_y;
+    heightVal = (rel === null || rel === undefined)
+      ? "—" : formatHeightDelta(rel);
+  }
+  const spreadVal = (stats.std_y !== undefined && stats.std_y !== null)
+    ? formatLength(stats.std_y) : "—";
+  return `<span class="meta-k">Height:</span><span class="meta-v">${heightVal}</span>`
+    + `<span class="meta-k">Spread:</span><span class="meta-v">${spreadVal}</span>`;
+}
+
 function refreshPolygonsList() {
   const hasTopology = !!state.plan?.topology;
   document.getElementById("btn-unsnap").hidden = !hasTopology;
@@ -1111,19 +1135,21 @@ function refreshPolygonsList() {
       : mainFlag === "region"
         ? `<input type="radio" class="main-radio" name="main-face" title="Make this the datum face">`
         : "";
+    const isCeiling = (mainFlag === "main" || mainFlag === "region");
+    const metaCls = "meta" + (isCeiling ? " meta-grid" : "");
     if (allowTintEdit) {
       head.innerHTML =
         radioHtml +
         `<input type="color" class="swatch swatch-input" value="${color}" title="Change tint">` +
         `<div class="label">${label}</div>` +
-        `<div class="meta">${meta}</div>` +
+        `<div class="${metaCls}">${meta}</div>` +
         `<button class="del-btn" title="Delete">×</button>`;
     } else {
       head.innerHTML =
         radioHtml +
         `<div class="swatch" style="background:${color}"></div>` +
         `<div class="label">${label}</div>` +
-        `<div class="meta">${meta}</div>` +
+        `<div class="${metaCls}">${meta}</div>` +
         `<button class="del-btn" title="Delete">×</button>`;
     }
     li.appendChild(head);
@@ -1153,14 +1179,8 @@ function refreshPolygonsList() {
       };
     }
 
-    if (face && face.histogram && face.histogram.counts) {
-      const sparkWrap = document.createElement("div");
-      sparkWrap.className = "poly-spark";
-      sparkWrap.onclick = (e) => e.stopPropagation();
-      sparkWrap.appendChild(renderHistogramSparkline(face, selKey));
-      li.appendChild(sparkWrap);
-    }
-
+    // Notes input first — the user types text more often than they
+    // tweak the slider, so it sits closer to the row's identifying head.
     if (allowNotes) {
       const noteRow = document.createElement("div");
       noteRow.className = "poly-notes";
@@ -1177,6 +1197,14 @@ function refreshPolygonsList() {
       input.onblur = () => saveNotes(selKey, input.value);
       noteRow.appendChild(input);
       li.appendChild(noteRow);
+    }
+
+    if (face && face.histogram && face.histogram.counts) {
+      const sparkWrap = document.createElement("div");
+      sparkWrap.className = "poly-spark";
+      sparkWrap.onclick = (e) => e.stopPropagation();
+      sparkWrap.appendChild(renderHistogramSparkline(face, selKey));
+      li.appendChild(sparkWrap);
     }
 
     li.onclick = (e) => {
@@ -1206,23 +1234,15 @@ function refreshPolygonsList() {
       "interface:" + iface.id, null, false, false, null, "off");
   }
   if (state.plan.main) {
-    const s = state.plan.main.stats || {};
-    const stdTxt = (s.std_y !== undefined && s.std_y !== null)
-      ? formatLength(s.std_y) : "—";
     addRow("main", state.plan.main.label || "Main Ceiling (1)",
       state.plan.main.tint || "#80cbc4",
-      `${formatHeightDelta(0)}  spread ${stdTxt}`,
+      ceilingMetaHtml(state.plan.main, /*isMain*/ true),
       "main", state.plan.main.notes, true, true, state.plan.main, "main");
   }
   for (const r of state.plan.regions || []) {
-    const s = r.stats || {};
-    const rel = r.relative_y;
-    const relTxt = rel === null || rel === undefined ? "—" : formatHeightDelta(rel);
-    const stdTxt = (s.std_y !== undefined && s.std_y !== null)
-      ? formatLength(s.std_y) : "—";
     addRow("region:" + r.id, r.label || `Ceiling Region (${r.id + 2})`,
       r.tint || "#ff7043",
-      `${relTxt}  spread ${stdTxt}`,
+      ceilingMetaHtml(r, /*isMain*/ false),
       "region:" + r.id, r.notes, true, true, r, "region");
   }
   for (const o of state.plan.obstructions || []) {
@@ -1244,8 +1264,11 @@ function renderHistogramSparkline(face, selKey) {
   const hist = face.histogram;
   const SVG_NS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(SVG_NS, "svg");
+  // 2× height (was 40). Three bands stacked vertically: peak% on top
+  // of the bars, the bars themselves, then the axis row (mm offsets
+  // from main + below%/slider/above% all on one baseline).
   const W = 264;
-  const H = 40;
+  const H = 80;
   svg.setAttribute("width", W);
   svg.setAttribute("height", H);
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
@@ -1265,19 +1288,28 @@ function renderHistogramSparkline(face, selKey) {
   }
 
   const counts = hist.counts;
+  const edges = hist.bin_edges_m;
   const minY = hist.min_y;
   const maxY = hist.max_y;
   const range = Math.max(1e-6, maxY - minY);
   const sy = (face.selected_y ?? face.stats?.mean_y);
   const meanY = face.stats?.mean_y;
   const tint = face.tint || "#80cbc4";
+  const isMain = (selKey === "main");
+  // Datum = main's selected_y. For the main row we ARE the datum, so
+  // labels just read 0 / +/- relative to the main itself's selected_y.
+  const datum = state.plan?.main?.selected_y
+             ?? state.plan?.main?.stats?.mean_y
+             ?? meanY ?? sy;
 
-  const padX = 4;
-  const padTop = 3;
-  const padBot = 14;          // axis label row at the bottom
+  const padX = 6;
+  const padTop = 14;          // peak% header row
+  const padBot = 30;          // axis labels (top sub-row) + readouts (bot)
   const usableW = W - 2 * padX;
   const usableH = H - padTop - padBot;
+  const totalCount = counts.reduce((a, b) => a + b, 0) || 1;
   const maxCount = Math.max(1, ...counts);
+  const peakPct = (maxCount / totalCount) * 100;
 
   const xForY = (y) => padX + ((y - minY) / range) * usableW;
 
@@ -1299,17 +1331,52 @@ function renderHistogramSparkline(face, selKey) {
     svg.appendChild(rect);
   }
 
-  // Mean reference (faint dashed)
-  if (Number.isFinite(meanY)) {
+  function makeText(x, y, anchor, fill, weight, size, content) {
+    const t = document.createElementNS(SVG_NS, "text");
+    t.setAttribute("x", x);
+    t.setAttribute("y", y);
+    t.setAttribute("text-anchor", anchor);
+    t.setAttribute("font-size", String(size));
+    t.setAttribute("fill", fill);
+    if (weight) t.setAttribute("font-weight", weight);
+    t.textContent = content;
+    return t;
+  }
+
+  // Header: peak frequency as a number — answers "how flat is this
+  // ceiling?" at a glance.
+  svg.appendChild(makeText(W - padX, padTop - 4, "end", "#8b939c", "600", 9,
+    `peak ${peakPct.toFixed(1)}%`));
+  svg.appendChild(makeText(padX, padTop - 4, "start", "#8b939c", null, 9,
+    `${counts.length} bins • ${(hist.bin_w_m * 1000).toFixed(0)} mm`));
+
+  // Datum (main's selected_y) line — 0 mm on the relative axis. Only
+  // draw it when it falls inside this face's histogram range.
+  if (Number.isFinite(datum) && datum >= minY && datum <= maxY) {
+    const dx = xForY(datum);
+    const datumLine = document.createElementNS(SVG_NS, "line");
+    datumLine.setAttribute("x1", dx);
+    datumLine.setAttribute("x2", dx);
+    datumLine.setAttribute("y1", padTop);
+    datumLine.setAttribute("y2", padTop + usableH);
+    datumLine.setAttribute("stroke", "#888");
+    datumLine.setAttribute("stroke-width", "1");
+    datumLine.setAttribute("stroke-dasharray", "3,2");
+    svg.appendChild(datumLine);
+  }
+
+  // Mean reference (kept faint so it doesn't compete with the datum
+  // line when they're far apart, e.g. a vault region).
+  if (Number.isFinite(meanY) && Math.abs(meanY - datum) > 1e-4) {
     const mx = xForY(meanY);
     const meanLine = document.createElementNS(SVG_NS, "line");
     meanLine.setAttribute("x1", mx);
     meanLine.setAttribute("x2", mx);
     meanLine.setAttribute("y1", padTop);
     meanLine.setAttribute("y2", padTop + usableH);
-    meanLine.setAttribute("stroke", "#aaa");
-    meanLine.setAttribute("stroke-width", "0.8");
-    meanLine.setAttribute("stroke-dasharray", "2,2");
+    meanLine.setAttribute("stroke", "#bbb");
+    meanLine.setAttribute("stroke-width", "0.6");
+    meanLine.setAttribute("stroke-dasharray", "1,2");
     svg.appendChild(meanLine);
   }
 
@@ -1318,38 +1385,52 @@ function renderHistogramSparkline(face, selKey) {
   const line = document.createElementNS(SVG_NS, "line");
   line.setAttribute("x1", handleSx);
   line.setAttribute("x2", handleSx);
-  line.setAttribute("y1", padTop - 1);
-  line.setAttribute("y2", padTop + usableH + 1);
+  line.setAttribute("y1", padTop - 2);
+  line.setAttribute("y2", padTop + usableH + 2);
   line.setAttribute("stroke", "#ef5350");
-  line.setAttribute("stroke-width", "1.6");
+  line.setAttribute("stroke-width", "1.8");
   svg.appendChild(line);
   const blob = document.createElementNS(SVG_NS, "circle");
   blob.setAttribute("cx", handleSx);
   blob.setAttribute("cy", padTop + 2);
-  blob.setAttribute("r", "3.5");
+  blob.setAttribute("r", "4");
   blob.setAttribute("fill", "#ef5350");
   svg.appendChild(blob);
 
-  // Axis labels: min on the left, max on the right, selected centred
-  // beneath the marker. Use absolute heights so the user knows the
-  // physical surface they're picking, not just a delta.
-  function makeText(x, y, anchor, fill, weight, content) {
-    const t = document.createElementNS(SVG_NS, "text");
-    t.setAttribute("x", x);
-    t.setAttribute("y", y);
-    t.setAttribute("text-anchor", anchor);
-    t.setAttribute("font-size", "9");
-    t.setAttribute("fill", fill);
-    if (weight) t.setAttribute("font-weight", weight);
-    t.textContent = content;
-    return t;
+  // Axis row: min / 0 / max in mm relative to the datum.
+  const yAxis = padTop + usableH + 11;
+  const minRel = minY - datum;
+  const maxRel = maxY - datum;
+  svg.appendChild(makeText(padX, yAxis, "start", "#8b939c", null, 9,
+    formatHeightDelta(minRel)));
+  svg.appendChild(makeText(W - padX, yAxis, "end", "#8b939c", null, 9,
+    formatHeightDelta(maxRel)));
+  if (datum >= minY && datum <= maxY) {
+    const zeroX = xForY(datum);
+    svg.appendChild(makeText(zeroX, yAxis, "middle", "#666", "600", 9, "0"));
   }
-  svg.appendChild(makeText(padX, H - 2, "start", "#8b939c", null,
-    formatHeightAbs(minY)));
-  svg.appendChild(makeText(W - padX, H - 2, "end", "#8b939c", null,
-    formatHeightAbs(maxY)));
-  const selLabel = makeText(handleSx, H - 2, "middle", "#ef5350", "600",
-    formatHeightAbs(sy));
+
+  // Below% / slider readout (relative mm) / above% — all on the same
+  // bottom baseline. Recomputed on every drag so the user sees the
+  // split shift live as they move the marker.
+  function partitionByY(threshold) {
+    let below = 0;
+    for (let i = 0; i < counts.length; i++) {
+      const binCenter = (edges[i] + edges[i + 1]) / 2;
+      if (binCenter < threshold) below += counts[i];
+    }
+    return { below, above: totalCount - below };
+  }
+  const yReadout = H - 4;
+  const initial = partitionByY(sy);
+  const belowLabel = makeText(padX, yReadout, "start", "#8b939c", null, 10,
+    `↓ ${(initial.below / totalCount * 100).toFixed(0)}%`);
+  svg.appendChild(belowLabel);
+  const aboveLabel = makeText(W - padX, yReadout, "end", "#8b939c", null, 10,
+    `${(initial.above / totalCount * 100).toFixed(0)}% ↑`);
+  svg.appendChild(aboveLabel);
+  const selLabel = makeText(handleSx, yReadout, "middle", "#ef5350", "700", 11,
+    isMain ? "0" : formatHeightDelta(sy - datum));
   svg.appendChild(selLabel);
 
   // Drag interaction — clamp to [minY, maxY] and snap to bin width so
@@ -1358,6 +1439,38 @@ function renderHistogramSparkline(face, selKey) {
   svg.style.userSelect = "none";
   let dragging = false;
   let lastY = sy;
+  // Throttle the below-overlay fetches: at most one in flight at a
+  // time, queue the latest threshold and fire it when the previous
+  // returns. Avoids a request storm on fast drags.
+  let overlayInflight = false;
+  let overlayQueued = null;
+  function requestOverlay(threshold) {
+    if (overlayInflight) { overlayQueued = threshold; return; }
+    overlayInflight = true;
+    const url = `/api/sessions/${state.sessionId}/face_below`
+      + `?key=${encodeURIComponent(selKey)}&y=${threshold}`;
+    fetch(url).then(async (r) => {
+      if (!r.ok) return;
+      const bboxHdr = r.headers.get("X-Bbox") || "0,0,0,0";
+      const bbox = bboxHdr.split(",").map(Number);
+      const blob = await r.blob();
+      const bm = await createImageBitmap(blob);
+      // The user may have stopped dragging by the time this returns —
+      // only commit the overlay if the slider is still active for the
+      // same face.
+      if (dragging) {
+        state.belowOverlay = { key: selKey, threshold, bm, bbox };
+        draw();
+      }
+    }).catch(() => {}).finally(() => {
+      overlayInflight = false;
+      if (overlayQueued != null && dragging) {
+        const next = overlayQueued;
+        overlayQueued = null;
+        requestOverlay(next);
+      }
+    });
+  }
   function applyFromEvent(e) {
     const rect = svg.getBoundingClientRect();
     const xPx = e.clientX - rect.left;
@@ -1369,8 +1482,12 @@ function renderHistogramSparkline(face, selKey) {
     line.setAttribute("x2", px);
     blob.setAttribute("cx", px);
     selLabel.setAttribute("x", px);
-    selLabel.textContent = formatHeightAbs(newY);
+    selLabel.textContent = isMain ? "0" : formatHeightDelta(newY - datum);
+    const part = partitionByY(newY);
+    belowLabel.textContent = `↓ ${(part.below / totalCount * 100).toFixed(0)}%`;
+    aboveLabel.textContent = `${(part.above / totalCount * 100).toFixed(0)}% ↑`;
     lastY = newY;
+    requestOverlay(newY);
   }
   svg.addEventListener("mousedown", (e) => {
     e.stopPropagation();
@@ -1385,6 +1502,9 @@ function renderHistogramSparkline(face, selKey) {
   window.addEventListener("mouseup", () => {
     if (!dragging) return;
     dragging = false;
+    overlayQueued = null;
+    state.belowOverlay = null;
+    draw();
     pushSelectedY(selKey, lastY);
   });
 
@@ -1520,6 +1640,16 @@ function draw() {
   drawHeatmap("main", state.plan.main);
   for (const r of state.plan.regions || []) {
     drawHeatmap("region:" + r.id, r);
+  }
+
+  // Below-threshold overlay — drawn while the user drags the histogram
+  // slider. Pixels in the active face whose Y < the slider value render
+  // as a pink/black checker so the user can see what would be cropped
+  // out if they commit the marker's current position. Cleared on
+  // slider mouseup.
+  if (state.belowOverlay && state.belowOverlay.bm) {
+    const ov = state.belowOverlay;
+    ctx.drawImage(ov.bm, ov.bbox[0], ov.bbox[1]);
   }
 
   // Existing polygons

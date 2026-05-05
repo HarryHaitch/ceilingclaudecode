@@ -222,6 +222,15 @@ ul#polygons-list { list-style: none; padding: 0; margin: 0; }
 .poly-row .swatch-input::-moz-color-swatch { border: none; border-radius: 2px; }
 .poly-row .label { flex: 1; font-size: 12px; }
 .poly-row .meta { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.poly-row .meta-grid {
+  display: grid;
+  grid-template-columns: max-content max-content;
+  column-gap: 4px;
+  line-height: 1.2;
+  align-items: baseline;
+}
+.poly-row .meta-grid .meta-k { color: var(--muted); }
+.poly-row .meta-grid .meta-v { color: var(--text); text-align: right; }
 .poly-row input[type=checkbox] { margin: 0; }
 .poly-row .del-btn {
   padding: 1px 6px; font-size: 11px;
