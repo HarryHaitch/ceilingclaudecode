@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>ceiling-rcp</title>
-  <link rel="stylesheet" href="style.css?v=20">
+  <link rel="stylesheet" href="style.css?v=21">
 </head>
 <body>
   <header>
@@ -214,15 +214,48 @@
 
     <aside id="right-sidebar">
       <section id="right-panel" hidden>
-        <h3>Regions</h3>
-        <ul id="polygons-list"></ul>
+        <div class="right-tabs" role="tablist">
+          <button class="right-tab active" data-rtab="regions" role="tab">Regions</button>
+          <button class="right-tab" data-rtab="services" role="tab">Services</button>
+        </div>
 
-        <h3>Selected</h3>
-        <div id="selection-info" class="muted">Nothing selected</div>
+        <div class="right-tab-pane" data-rpane="regions">
+          <h3>Regions</h3>
+          <ul id="polygons-list"></ul>
+
+          <h3>Selected</h3>
+          <div id="selection-info" class="muted">Nothing selected</div>
+        </div>
+
+        <div class="right-tab-pane" data-rpane="services" hidden>
+          <h3>Ceiling services</h3>
+          <div id="services-status" class="muted">Loading…</div>
+
+          <div class="services-actions">
+            <button id="btn-print-symbols" class="step-btn primary"
+                    aria-pressed="false" disabled>
+              Print symbols on plan
+            </button>
+            <button id="btn-generate-symbols" class="step-btn"
+                    title="Run SAM 3 segmentation + projection on the source scan">
+              Detect symbols (SAM 3)
+            </button>
+          </div>
+
+          <h3>Legend</h3>
+          <ul id="symbols-legend" class="legend-list muted">
+            <li class="muted">No symbols loaded yet.</li>
+          </ul>
+
+          <h3>Selected symbol</h3>
+          <div id="symbol-info" class="muted">
+            Click a symbol on the plan to see its details.
+          </div>
+        </div>
       </section>
     </aside>
   </main>
 
-  <script src="app.js?v=26"></script>
+  <script src="app.js?v=28"></script>
 </body>
 </html>

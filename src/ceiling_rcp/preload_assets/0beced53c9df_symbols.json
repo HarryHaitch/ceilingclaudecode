@@ -1,0 +1,3207 @@
+{
+  "version": 1,
+  "session_id": "0beced53c9df",
+  "ceiling_image": "out/ceiling.jpg",
+  "grid": {
+    "width": 2315,
+    "height": 3904,
+    "pixels_per_metre": 150.0,
+    "min_x": -7.782665000000001,
+    "max_x": 7.648609,
+    "min_z": -14.018382,
+    "max_z": 12.002859
+  },
+  "symbol_classes": {
+    "diffuser": {
+      "label": "Diffuser",
+      "shape": "rect_with_cross",
+      "color_hex": "#40c8ff",
+      "fixed_diameter_cm": null,
+      "default_size_cm": [
+        30.0,
+        30.0
+      ],
+      "source_concept": "vent"
+    },
+    "downlight": {
+      "label": "Downlight",
+      "shape": "circle",
+      "color_hex": "#ffdc40",
+      "fixed_diameter_cm": 20.0,
+      "default_size_cm": [
+        20.0,
+        20.0
+      ],
+      "source_concept": "light"
+    },
+    "led_strip_panel": {
+      "label": "LED Strip/Panel Light",
+      "shape": "rect",
+      "color_hex": "#ff9a30",
+      "fixed_diameter_cm": null,
+      "default_size_cm": [
+        60.0,
+        60.0
+      ],
+      "source_concept": "light"
+    },
+    "sprinkler": {
+      "label": "Sprinkler",
+      "shape": "dot_in_circle",
+      "color_hex": "#ff4040",
+      "fixed_diameter_cm": 12.0,
+      "fixed_inner_dot_diameter_cm": 5.0,
+      "default_size_cm": [
+        12.0,
+        12.0
+      ],
+      "source_concept": "ceiling item"
+    },
+    "miscellaneous": {
+      "label": "Miscellaneous",
+      "shape": "rect_with_M",
+      "color_hex": "#c060ff",
+      "fixed_diameter_cm": null,
+      "default_size_cm": [
+        30.0,
+        30.0
+      ],
+      "source_concept": "ceiling item"
+    }
+  },
+  "thresholds": {
+    "downlight_max_diameter_cm": 20.0,
+    "sprinkler_max_diameter_cm": 5.0
+  },
+  "symbols": [
+    {
+      "id": 1,
+      "class": "miscellaneous",
+      "index": 1,
+      "centroid_px": [
+        442.23529529571533,
+        2518.441177368164
+      ],
+      "length_px": 21.828205108642578,
+      "width_px": 13.339459419250488,
+      "angle_deg": 75.96376037597656,
+      "source": {
+        "cluster_id": 1,
+        "concept": "ceiling item",
+        "n_views": 4,
+        "median_score": 0.5859375,
+        "width_m": 0.08892972946166992,
+        "length_m": 0.14552136739095053,
+        "mean_mask_diameter_cm": 7.214189915151769
+      }
+    },
+    {
+      "id": 2,
+      "class": "miscellaneous",
+      "index": 2,
+      "centroid_px": [
+        403.68811988830566,
+        2771.618812561035
+      ],
+      "length_px": 74.1302719116211,
+      "width_px": 28.159555435180664,
+      "angle_deg": 95.71059226989746,
+      "source": {
+        "cluster_id": 2,
+        "concept": "ceiling item",
+        "n_views": 4,
+        "median_score": 0.59765625,
+        "width_m": 0.1877303695678711,
+        "length_m": 0.4942018127441406,
+        "mean_mask_diameter_cm": 16.804573463695647
+      }
+    },
+    {
+      "id": 3,
+      "class": "miscellaneous",
+      "index": 3,
+      "centroid_px": [
+        428.00000190734863,
+        2075.5
+      ],
+      "length_px": 25.043960571289062,
+      "width_px": 15.652474403381348,
+      "angle_deg": 63.43495178222656,
+      "source": {
+        "cluster_id": 3,
+        "concept": "ceiling item",
+        "n_views": 6,
+        "median_score": 0.765625,
+        "width_m": 0.10434982935587565,
+        "length_m": 0.16695973714192708,
+        "mean_mask_diameter_cm": 8.201190570123995
+      }
+    },
+    {
+      "id": 4,
+      "class": "miscellaneous",
+      "index": 4,
+      "centroid_px": [
+        450.0,
+        1594.0
+      ],
+      "length_px": 14.0,
+      "width_px": 12.0,
+      "angle_deg": 90.0,
+      "source": {
+        "cluster_id": 4,
+        "concept": "ceiling item",
+        "n_views": 4,
+        "median_score": 0.62890625,
+        "width_m": 0.08,
+        "length_m": 0.09333333333333334,
+        "mean_mask_diameter_cm": 8.472224992131856
+      }
+    },
+    {
+      "id": 5,
+      "class": "miscellaneous",
+      "index": 5,
+      "centroid_px": [
+        637.0675659179688,
+        886.0945930480957
+      ],
+      "length_px": 34.68818283081055,
+      "width_px": 32.715396881103516,
+      "angle_deg": 99.46232223510742,
+      "source": {
+        "cluster_id": 5,
+        "concept": "ceiling item",
+        "n_views": 9,
+        "median_score": 0.7421875,
+        "width_m": 0.21810264587402345,
+        "length_m": 0.23125455220540364,
+        "mean_mask_diameter_cm": 15.557677889295688
+      }
+    },
+    {
+      "id": 6,
+      "class": "miscellaneous",
+      "index": 6,
+      "centroid_px": [
+        454.0,
+        1084.0
+      ],
+      "length_px": 14.0,
+      "width_px": 12.0,
+      "angle_deg": 90.0,
+      "source": {
+        "cluster_id": 6,
+        "concept": "ceiling item",
+        "n_views": 5,
+        "median_score": 0.57421875,
+        "width_m": 0.08,
+        "length_m": 0.09333333333333334,
+        "mean_mask_diameter_cm": 7.665111345975636
+      }
+    },
+    {
+      "id": 7,
+      "class": "miscellaneous",
+      "index": 7,
+      "centroid_px": [
+        711.5,
+        944.5
+      ],
+      "length_px": 27.0,
+      "width_px": 25.0,
+      "angle_deg": 90.0,
+      "source": {
+        "cluster_id": 7,
+        "concept": "ceiling item",
+        "n_views": 7,
+        "median_score": 0.7421875,
+        "width_m": 0.16666666666666666,
+        "length_m": 0.18,
+        "mean_mask_diameter_cm": 12.922598204702055
+      }
+    },
+    {
+      "id": 8,
+      "class": "miscellaneous",
+      "index": 8,
+      "centroid_px": [
+        712.0,
+        882.5
+      ],
+      "length_px": 27.0,
+      "width_px": 20.0,
+      "angle_deg": 90.0,
+      "source": {
+        "cluster_id": 8,
+        "concept": "ceiling item",
+        "n_views": 7,
+        "median_score": 0.640625,
+        "width_m": 0.13333333333333333,
+        "length_m": 0.18,
+        "mean_mask_diameter_cm": 10.753225952780657
+      }
+    },
+    {
+      "id": 9,
+      "class": "miscellaneous",
+      "index": 9,
+      "centroid_px": [
+        904.0,
+        792.5
+      ],
+      "length_px": 90.0,
+      "width_px": 89.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 9,
+        "concept": "ceiling item",
+        "n_views": 6,
+        "median_score": 0.642578125,
+        "width_m": 0.5933333333333334,
+        "length_m": 0.6,
+        "mean_mask_diameter_cm": 50.857342262519225
+      }
+    },
+    {
+      "id": 10,
+      "class": "miscellaneous",
+      "index": 10,
+      "centroid_px": [
+        881.5,
+        658.5
+      ],
+      "length_px": 31.0,
+      "width_px": 27.0,
+      "angle_deg": 90.0,
+      "source": {
+        "cluster_id": 10,
+        "concept": "ceiling item",
+        "n_views": 4,
+        "median_score": 0.736328125,
+        "width_m": 0.18,
+        "length_m": 0.20666666666666667,
+        "mean_mask_diameter_cm": 12.231965958419778
+      }
+    },
+    {
+      "id": 11,
+      "class": "miscellaneous",
+      "index": 11,
+      "centroid_px": [
+        460.32353019714355,
+        580.2941188812256
+      ],
+      "length_px": 19.160314559936523,
+      "width_px": 13.096923828125,
+      "angle_deg": 75.96376037597656,
+      "source": {
+        "cluster_id": 11,
+        "concept": "ceiling item",
+        "n_views": 3,
+        "median_score": 0.5390625,
+        "width_m": 0.08731282552083333,
+        "length_m": 0.12773543039957683,
+        "mean_mask_diameter_cm": 7.800308446217122
+      }
+    },
+    {
+      "id": 12,
+      "class": "miscellaneous",
+      "index": 12,
+      "centroid_px": [
+        877.5000038146973,
+        583.0
+      ],
+      "length_px": 27.577163696289062,
+      "width_px": 14.849242210388184,
+      "angle_deg": 135.0,
+      "source": {
+        "cluster_id": 12,
+        "concept": "ceiling item",
+        "n_views": 10,
+        "median_score": 0.681640625,
+        "width_m": 0.09899494806925456,
+        "length_m": 0.18384775797526043,
+        "mean_mask_diameter_cm": 7.822150583276428
+      }
+    },
+    {
+      "id": 13,
+      "class": "miscellaneous",
+      "index": 13,
+      "centroid_px": [
+        1127.2500038146973,
+        661.2500019073486
+      ],
+      "length_px": 43.84062194824219,
+      "width_px": 30.405588150024414,
+      "angle_deg": 135.0,
+      "source": {
+        "cluster_id": 13,
+        "concept": "ceiling item",
+        "n_views": 10,
+        "median_score": 0.783203125,
+        "width_m": 0.20270392100016277,
+        "length_m": 0.2922708129882812,
+        "mean_mask_diameter_cm": 14.19946068759673
+      }
+    },
+    {
+      "id": 14,
+      "class": "miscellaneous",
+      "index": 14,
+      "centroid_px": [
+        1425.649995803833,
+        598.0500011444092
+      ],
+      "length_px": 21.637470245361328,
+      "width_px": 13.01076602935791,
+      "angle_deg": 171.8698959350586,
+      "source": {
+        "cluster_id": 14,
+        "concept": "ceiling item",
+        "n_views": 3,
+        "median_score": 0.58203125,
+        "width_m": 0.0867384401957194,
+        "length_m": 0.1442498016357422,
+        "mean_mask_diameter_cm": 7.6591854128058845
+      }
+    },
+    {
+      "id": 15,
+      "class": "miscellaneous",
+      "index": 15,
+      "centroid_px": [
+        1805.2283020019531,
+        594.9490547180176
+      ],
+      "length_px": 29.547595977783203,
+      "width_px": 20.947463989257812,
+      "angle_deg": 100.61965465545654,
+      "source": {
+        "cluster_id": 15,
+        "concept": "ceiling item",
+        "n_views": 8,
+        "median_score": 0.552734375,
+        "width_m": 0.1396497599283854,
+        "length_m": 0.19698397318522134,
+        "mean_mask_diameter_cm": 7.322610630228987
+      }
+    },
+    {
+      "id": 16,
+      "class": "miscellaneous",
+      "index": 16,
+      "centroid_px": [
+        1887.6999969482422,
+        970.8999996185303
+      ],
+      "length_px": 37.947322845458984,
+      "width_px": 24.6657657623291,
+      "angle_deg": 18.43494987487793,
+      "source": {
+        "cluster_id": 16,
+        "concept": "ceiling item",
+        "n_views": 5,
+        "median_score": 0.5703125,
+        "width_m": 0.16443843841552735,
+        "length_m": 0.25298215230305987,
+        "mean_mask_diameter_cm": 10.753429560208007
+      }
+    },
+    {
+      "id": 17,
+      "class": "miscellaneous",
+      "index": 17,
+      "centroid_px": [
+        1575.379379272461,
+        1004.4299621582031
+      ],
+      "length_px": 33.62189865112305,
+      "width_px": 24.51466941833496,
+      "angle_deg": 3.5763344764709473,
+      "source": {
+        "cluster_id": 17,
+        "concept": "ceiling item",
+        "n_views": 6,
+        "median_score": 0.599609375,
+        "width_m": 0.1634311294555664,
+        "length_m": 0.22414599100748697,
+        "mean_mask_diameter_cm": 13.149013441338699
+      }
+    },
+    {
+      "id": 18,
+      "class": "miscellaneous",
+      "index": 18,
+      "centroid_px": [
+        1611.5,
+        1002.5
+      ],
+      "length_px": 23.0,
+      "width_px": 23.0,
+      "angle_deg": 90.0,
+      "source": {
+        "cluster_id": 18,
+        "concept": "ceiling item",
+        "n_views": 4,
+        "median_score": 0.599609375,
+        "width_m": 0.15333333333333332,
+        "length_m": 0.15333333333333332,
+        "mean_mask_diameter_cm": 10.864326865172574
+      }
+    },
+    {
+      "id": 19,
+      "class": "miscellaneous",
+      "index": 19,
+      "centroid_px": [
+        1572.0,
+        2060.0
+      ],
+      "length_px": 44.0,
+      "width_px": 30.0,
+      "angle_deg": 90.0,
+      "source": {
+        "cluster_id": 19,
+        "concept": "ceiling item",
+        "n_views": 16,
+        "median_score": 0.78125,
+        "width_m": 0.2,
+        "length_m": 0.29333333333333333,
+        "mean_mask_diameter_cm": 16.590408092343033
+      }
+    },
+    {
+      "id": 20,
+      "class": "miscellaneous",
+      "index": 20,
+      "centroid_px": [
+        1606.3399963378906,
+        2061.3800010681152
+      ],
+      "length_px": 34.78965759277344,
+      "width_px": 21.77889060974121,
+      "angle_deg": 81.8698959350586,
+      "source": {
+        "cluster_id": 20,
+        "concept": "ceiling item",
+        "n_views": 15,
+        "median_score": 0.73046875,
+        "width_m": 0.14519260406494142,
+        "length_m": 0.2319310506184896,
+        "mean_mask_diameter_cm": 10.696986521777058
+      }
+    },
+    {
+      "id": 21,
+      "class": "miscellaneous",
+      "index": 21,
+      "centroid_px": [
+        1882.0958938598633,
+        2046.5890445709229
+      ],
+      "length_px": 45.646053314208984,
+      "width_px": 35.11235046386719,
+      "angle_deg": 69.44395446777344,
+      "source": {
+        "cluster_id": 21,
+        "concept": "ceiling item",
+        "n_views": 8,
+        "median_score": 0.62890625,
+        "width_m": 0.23408233642578125,
+        "length_m": 0.30430702209472654,
+        "mean_mask_diameter_cm": 11.362725624313223
+      }
+    },
+    {
+      "id": 22,
+      "class": "miscellaneous",
+      "index": 22,
+      "centroid_px": [
+        1799.8965530395508,
+        2104.241379737854
+      ],
+      "length_px": 22.28343963623047,
+      "width_px": 14.855627059936523,
+      "angle_deg": 158.19859313964844,
+      "source": {
+        "cluster_id": 22,
+        "concept": "ceiling item",
+        "n_views": 4,
+        "median_score": 0.53125,
+        "width_m": 0.09903751373291016,
+        "length_m": 0.14855626424153645,
+        "mean_mask_diameter_cm": 6.779595713624763
+      }
+    },
+    {
+      "id": 23,
+      "class": "miscellaneous",
+      "index": 23,
+      "centroid_px": [
+        1017.0,
+        2019.0
+      ],
+      "length_px": 54.0,
+      "width_px": 28.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 23,
+        "concept": "ceiling item",
+        "n_views": 12,
+        "median_score": 0.67578125,
+        "width_m": 0.18666666666666668,
+        "length_m": 0.36,
+        "mean_mask_diameter_cm": 10.113428099507242
+      }
+    },
+    {
+      "id": 24,
+      "class": "miscellaneous",
+      "index": 24,
+      "centroid_px": [
+        1066.9550514221191,
+        2082.4719104766846
+      ],
+      "length_px": 61.16178894042969,
+      "width_px": 43.322933197021484,
+      "angle_deg": 167.00537872314453,
+      "source": {
+        "cluster_id": 24,
+        "concept": "ceiling item",
+        "n_views": 5,
+        "median_score": 0.734375,
+        "width_m": 0.2888195546468099,
+        "length_m": 0.40774525960286456,
+        "mean_mask_diameter_cm": 19.60143634187456
+      }
+    },
+    {
+      "id": 25,
+      "class": "miscellaneous",
+      "index": 25,
+      "centroid_px": [
+        778.1454887390137,
+        1999.2808837890625
+      ],
+      "length_px": 109.90019989013672,
+      "width_px": 92.0142822265625,
+      "angle_deg": 1.9749339818954468,
+      "source": {
+        "cluster_id": 25,
+        "concept": "ceiling item",
+        "n_views": 15,
+        "median_score": 0.70703125,
+        "width_m": 0.6134285481770834,
+        "length_m": 0.7326679992675781,
+        "mean_mask_diameter_cm": 44.65743178536174
+      }
+    },
+    {
+      "id": 26,
+      "class": "miscellaneous",
+      "index": 26,
+      "centroid_px": [
+        687.5973453521729,
+        1957.4601783752441
+      ],
+      "length_px": 37.15847396850586,
+      "width_px": 30.291213989257812,
+      "angle_deg": 131.18592834472656,
+      "source": {
+        "cluster_id": 26,
+        "concept": "ceiling item",
+        "n_views": 10,
+        "median_score": 0.75390625,
+        "width_m": 0.20194142659505207,
+        "length_m": 0.24772315979003906,
+        "mean_mask_diameter_cm": 10.297348998223452
+      }
+    },
+    {
+      "id": 27,
+      "class": "miscellaneous",
+      "index": 27,
+      "centroid_px": [
+        681.0,
+        2101.5
+      ],
+      "length_px": 46.0,
+      "width_px": 45.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 27,
+        "concept": "ceiling item",
+        "n_views": 11,
+        "median_score": 0.87890625,
+        "width_m": 0.3,
+        "length_m": 0.30666666666666664,
+        "mean_mask_diameter_cm": 15.922304913876228
+      }
+    },
+    {
+      "id": 28,
+      "class": "miscellaneous",
+      "index": 28,
+      "centroid_px": [
+        843.2999992370605,
+        2093.1000022888184
+      ],
+      "length_px": 32.86920166015625,
+      "width_px": 26.41939926147461,
+      "angle_deg": 7.125016689300537,
+      "source": {
+        "cluster_id": 28,
+        "concept": "ceiling item",
+        "n_views": 12,
+        "median_score": 0.779296875,
+        "width_m": 0.17612932840983073,
+        "length_m": 0.21912801106770832,
+        "mean_mask_diameter_cm": 7.5848173143486335
+      }
+    },
+    {
+      "id": 29,
+      "class": "miscellaneous",
+      "index": 29,
+      "centroid_px": [
+        827.8935317993164,
+        2410.7158794403076
+      ],
+      "length_px": 44.966922760009766,
+      "width_px": 27.371171951293945,
+      "angle_deg": 112.16634559631348,
+      "source": {
+        "cluster_id": 29,
+        "concept": "ceiling item",
+        "n_views": 6,
+        "median_score": 0.765625,
+        "width_m": 0.18247447967529296,
+        "length_m": 0.29977948506673174,
+        "mean_mask_diameter_cm": 10.55898946528298
+      }
+    },
+    {
+      "id": 30,
+      "class": "miscellaneous",
+      "index": 30,
+      "centroid_px": [
+        685.6416893005371,
+        2022.779670715332
+      ],
+      "length_px": 43.757083892822266,
+      "width_px": 41.715599060058594,
+      "angle_deg": 105.64224624633789,
+      "source": {
+        "cluster_id": 30,
+        "concept": "ceiling item",
+        "n_views": 7,
+        "median_score": 0.85546875,
+        "width_m": 0.27810399373372396,
+        "length_m": 0.2917138926188151,
+        "mean_mask_diameter_cm": 12.236911287990445
+      }
+    },
+    {
+      "id": 31,
+      "class": "miscellaneous",
+      "index": 31,
+      "centroid_px": [
+        991.507007598877,
+        2736.949249267578
+      ],
+      "length_px": 86.86724090576172,
+      "width_px": 35.21829605102539,
+      "angle_deg": 97.85331344604492,
+      "source": {
+        "cluster_id": 31,
+        "concept": "ceiling item",
+        "n_views": 6,
+        "median_score": 0.529296875,
+        "width_m": 0.23478864034016927,
+        "length_m": 0.5791149393717447,
+        "mean_mask_diameter_cm": 9.226313170421026
+      }
+    },
+    {
+      "id": 32,
+      "class": "miscellaneous",
+      "index": 32,
+      "centroid_px": [
+        1008.2048740386963,
+        2383.362464904785
+      ],
+      "length_px": 40.62834548950195,
+      "width_px": 21.250925064086914,
+      "angle_deg": 15.52410888671875,
+      "source": {
+        "cluster_id": 32,
+        "concept": "ceiling item",
+        "n_views": 8,
+        "median_score": 0.748046875,
+        "width_m": 0.14167283376057943,
+        "length_m": 0.27085563659667966,
+        "mean_mask_diameter_cm": 11.31838276632843
+      }
+    },
+    {
+      "id": 33,
+      "class": "miscellaneous",
+      "index": 33,
+      "centroid_px": [
+        829.7500019073486,
+        2517.75
+      ],
+      "length_px": 25.45584487915039,
+      "width_px": 21.920310974121094,
+      "angle_deg": 135.0,
+      "source": {
+        "cluster_id": 33,
+        "concept": "ceiling item",
+        "n_views": 3,
+        "median_score": 0.5546875,
+        "width_m": 0.1461354064941406,
+        "length_m": 0.16970563252766926,
+        "mean_mask_diameter_cm": 7.550766672660905
+      }
+    },
+    {
+      "id": 34,
+      "class": "miscellaneous",
+      "index": 34,
+      "centroid_px": [
+        1416.4799423217773,
+        2545.836555480957
+      ],
+      "length_px": 56.203861236572266,
+      "width_px": 22.350709915161133,
+      "angle_deg": 17.447189331054688,
+      "source": {
+        "cluster_id": 34,
+        "concept": "ceiling item",
+        "n_views": 8,
+        "median_score": 0.595703125,
+        "width_m": 0.14900473276774087,
+        "length_m": 0.3746924082438151,
+        "mean_mask_diameter_cm": 7.964812967736682
+      }
+    },
+    {
+      "id": 35,
+      "class": "miscellaneous",
+      "index": 35,
+      "centroid_px": [
+        1284.2123107910156,
+        2542.9046783447266
+      ],
+      "length_px": 141.04428100585938,
+      "width_px": 104.86734008789062,
+      "angle_deg": 2.385944128036499,
+      "source": {
+        "cluster_id": 35,
+        "concept": "ceiling item",
+        "n_views": 10,
+        "median_score": 0.61328125,
+        "width_m": 0.6991156005859375,
+        "length_m": 0.9402952067057292,
+        "mean_mask_diameter_cm": 46.91065909232823
+      }
+    },
+    {
+      "id": 36,
+      "class": "miscellaneous",
+      "index": 36,
+      "centroid_px": [
+        1874.0000019073486,
+        3009.9999980926514
+      ],
+      "length_px": 26.870054244995117,
+      "width_px": 22.62741470336914,
+      "angle_deg": 45.0,
+      "source": {
+        "cluster_id": 36,
+        "concept": "ceiling item",
+        "n_views": 6,
+        "median_score": 0.61328125,
+        "width_m": 0.15084943135579426,
+        "length_m": 0.17913369496663412,
+        "mean_mask_diameter_cm": 10.125764464764698
+      }
+    },
+    {
+      "id": 37,
+      "class": "sprinkler",
+      "index": 1,
+      "centroid_px": [
+        1677.9070663452148,
+        3073.7967834472656
+      ],
+      "length_px": 630.0711669921875,
+      "width_px": 84.84434509277344,
+      "angle_deg": 91.9920939207077,
+      "source": {
+        "cluster_id": 37,
+        "concept": "ceiling item",
+        "n_views": 3,
+        "median_score": 0.703125,
+        "width_m": 0.5656289672851562,
+        "length_m": 4.200474446614583,
+        "mean_mask_diameter_cm": 2.988036396599919
+      }
+    },
+    {
+      "id": 38,
+      "class": "miscellaneous",
+      "index": 37,
+      "centroid_px": [
+        1795.2000045776367,
+        3077.8999996185303
+      ],
+      "length_px": 20.57182502746582,
+      "width_px": 12.969193458557129,
+      "angle_deg": 63.43495178222656,
+      "source": {
+        "cluster_id": 38,
+        "concept": "ceiling item",
+        "n_views": 3,
+        "median_score": 0.515625,
+        "width_m": 0.0864612897237142,
+        "length_m": 0.13714550018310548,
+        "mean_mask_diameter_cm": 6.321674886227277
+      }
+    },
+    {
+      "id": 39,
+      "class": "miscellaneous",
+      "index": 38,
+      "centroid_px": [
+        1592.5,
+        2632.5
+      ],
+      "length_px": 35.0,
+      "width_px": 9.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 39,
+        "concept": "ceiling item",
+        "n_views": 3,
+        "median_score": 0.54296875,
+        "width_m": 0.06,
+        "length_m": 0.23333333333333334,
+        "mean_mask_diameter_cm": 13.195416343889315
+      }
+    },
+    {
+      "id": 40,
+      "class": "miscellaneous",
+      "index": 39,
+      "centroid_px": [
+        990.5,
+        3071.5
+      ],
+      "length_px": 25.0,
+      "width_px": 15.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 40,
+        "concept": "ceiling item",
+        "n_views": 4,
+        "median_score": 0.5703125,
+        "width_m": 0.1,
+        "length_m": 0.16666666666666666,
+        "mean_mask_diameter_cm": 8.856204169235156
+      }
+    },
+    {
+      "id": 41,
+      "class": "miscellaneous",
+      "index": 40,
+      "centroid_px": [
+        1561.7945365905762,
+        3537.958433151245
+      ],
+      "length_px": 21.980396270751953,
+      "width_px": 15.25468635559082,
+      "angle_deg": 136.97493362426758,
+      "source": {
+        "cluster_id": 41,
+        "concept": "ceiling item",
+        "n_views": 3,
+        "median_score": 0.5625,
+        "width_m": 0.10169790903727213,
+        "length_m": 0.14653597513834635,
+        "mean_mask_diameter_cm": 14.207775861467539
+      }
+    },
+    {
+      "id": 42,
+      "class": "miscellaneous",
+      "index": 41,
+      "centroid_px": [
+        1039.2804908752441,
+        3600.975612640381
+      ],
+      "length_px": 38.540611267089844,
+      "width_px": 30.147809982299805,
+      "angle_deg": 6.34019136428833,
+      "source": {
+        "cluster_id": 42,
+        "concept": "ceiling item",
+        "n_views": 4,
+        "median_score": 0.783203125,
+        "width_m": 0.2009853998819987,
+        "length_m": 0.25693740844726565,
+        "mean_mask_diameter_cm": 17.660951101987877
+      }
+    },
+    {
+      "id": 43,
+      "class": "miscellaneous",
+      "index": 42,
+      "centroid_px": [
+        823.0,
+        3021.0
+      ],
+      "length_px": 16.0,
+      "width_px": 14.0,
+      "angle_deg": 90.0,
+      "source": {
+        "cluster_id": 43,
+        "concept": "ceiling item",
+        "n_views": 6,
+        "median_score": 0.728515625,
+        "width_m": 0.09333333333333334,
+        "length_m": 0.10666666666666667,
+        "mean_mask_diameter_cm": 7.653529595758686
+      }
+    },
+    {
+      "id": 44,
+      "class": "miscellaneous",
+      "index": 43,
+      "centroid_px": [
+        653.9000015258789,
+        3154.699998855591
+      ],
+      "length_px": 36.224300384521484,
+      "width_px": 33.541019439697266,
+      "angle_deg": 116.56505012512207,
+      "source": {
+        "cluster_id": 44,
+        "concept": "ceiling item",
+        "n_views": 5,
+        "median_score": 0.8125,
+        "width_m": 0.22360679626464844,
+        "length_m": 0.2414953358968099,
+        "mean_mask_diameter_cm": 14.377207315342714
+      }
+    },
+    {
+      "id": 45,
+      "class": "miscellaneous",
+      "index": 44,
+      "centroid_px": [
+        659.5,
+        2949.0
+      ],
+      "length_px": 28.0,
+      "width_px": 25.0,
+      "angle_deg": 90.0,
+      "source": {
+        "cluster_id": 45,
+        "concept": "ceiling item",
+        "n_views": 5,
+        "median_score": 0.8515625,
+        "width_m": 0.16666666666666666,
+        "length_m": 0.18666666666666668,
+        "mean_mask_diameter_cm": 12.274874288022191
+      }
+    },
+    {
+      "id": 46,
+      "class": "miscellaneous",
+      "index": 45,
+      "centroid_px": [
+        665.6808662414551,
+        3049.3929290771484
+      ],
+      "length_px": 89.79199981689453,
+      "width_px": 86.95475769042969,
+      "angle_deg": 91.84761035442352,
+      "source": {
+        "cluster_id": 46,
+        "concept": "ceiling item",
+        "n_views": 6,
+        "median_score": 0.7890625,
+        "width_m": 0.5796983846028646,
+        "length_m": 0.5986133321126302,
+        "mean_mask_diameter_cm": 46.977318768203595
+      }
+    },
+    {
+      "id": 47,
+      "class": "miscellaneous",
+      "index": 46,
+      "centroid_px": [
+        664.6279907226562,
+        3006.837881088257
+      ],
+      "length_px": 85.87831115722656,
+      "width_px": 35.928680419921875,
+      "angle_deg": 173.2901611328125,
+      "source": {
+        "cluster_id": 47,
+        "concept": "ceiling item",
+        "n_views": 6,
+        "median_score": 0.654296875,
+        "width_m": 0.2395245361328125,
+        "length_m": 0.5725220743815104,
+        "mean_mask_diameter_cm": 9.669637213229215
+      }
+    },
+    {
+      "id": 48,
+      "class": "miscellaneous",
+      "index": 47,
+      "centroid_px": [
+        1109.7862091064453,
+        2064.565517425537
+      ],
+      "length_px": 47.50201416015625,
+      "width_px": 43.681922912597656,
+      "angle_deg": 94.76364183425903,
+      "source": {
+        "cluster_id": 48,
+        "concept": "ceiling item",
+        "n_views": 3,
+        "median_score": 0.89453125,
+        "width_m": 0.2912128194173177,
+        "length_m": 0.31668009440104167,
+        "mean_mask_diameter_cm": 22.142831887500456
+      }
+    },
+    {
+      "id": 49,
+      "class": "downlight",
+      "index": 1,
+      "centroid_px": [
+        355.441650390625,
+        2407.6807136535645
+      ],
+      "length_px": 58.3289794921875,
+      "width_px": 28.60938262939453,
+      "angle_deg": 4.899092674255371,
+      "source": {
+        "cluster_id": 1,
+        "concept": "light",
+        "n_views": 22,
+        "median_score": 0.771484375,
+        "width_m": 0.19072921752929686,
+        "length_m": 0.38885986328125,
+        "mean_mask_diameter_cm": 12.144927116825878
+      }
+    },
+    {
+      "id": 50,
+      "class": "downlight",
+      "index": 2,
+      "centroid_px": [
+        344.54400634765625,
+        2047.5080032348633
+      ],
+      "length_px": 96.41926574707031,
+      "width_px": 42.84306716918945,
+      "angle_deg": 10.304845809936523,
+      "source": {
+        "cluster_id": 2,
+        "concept": "light",
+        "n_views": 17,
+        "median_score": 0.80078125,
+        "width_m": 0.28562044779459633,
+        "length_m": 0.6427951049804688,
+        "mean_mask_diameter_cm": 14.745717367238278
+      }
+    },
+    {
+      "id": 51,
+      "class": "downlight",
+      "index": 3,
+      "centroid_px": [
+        371.0,
+        1715.0
+      ],
+      "length_px": 44.0,
+      "width_px": 34.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 3,
+        "concept": "light",
+        "n_views": 30,
+        "median_score": 0.66015625,
+        "width_m": 0.22666666666666666,
+        "length_m": 0.29333333333333333,
+        "mean_mask_diameter_cm": 12.481574372929021
+      }
+    },
+    {
+      "id": 52,
+      "class": "downlight",
+      "index": 4,
+      "centroid_px": [
+        377.3147029876709,
+        1360.0911769866943
+      ],
+      "length_px": 39.49869918823242,
+      "width_px": 33.28628158569336,
+      "angle_deg": 85.60128784179688,
+      "source": {
+        "cluster_id": 4,
+        "concept": "light",
+        "n_views": 30,
+        "median_score": 0.609375,
+        "width_m": 0.2219085439046224,
+        "length_m": 0.2633246612548828,
+        "mean_mask_diameter_cm": 9.91167663666312
+      }
+    },
+    {
+      "id": 53,
+      "class": "downlight",
+      "index": 5,
+      "centroid_px": [
+        704.5294132232666,
+        1361.6176490783691
+      ],
+      "length_px": 38.88512420654297,
+      "width_px": 35.66387176513672,
+      "angle_deg": 57.528804779052734,
+      "source": {
+        "cluster_id": 5,
+        "concept": "light",
+        "n_views": 9,
+        "median_score": 0.59765625,
+        "width_m": 0.23775914510091145,
+        "length_m": 0.2592341613769531,
+        "mean_mask_diameter_cm": 13.546731912482032
+      }
+    },
+    {
+      "id": 54,
+      "class": "downlight",
+      "index": 6,
+      "centroid_px": [
+        380.0615425109863,
+        1012.0076923370361
+      ],
+      "length_px": 34.109554290771484,
+      "width_px": 29.768335342407227,
+      "angle_deg": 7.125016689300537,
+      "source": {
+        "cluster_id": 6,
+        "concept": "light",
+        "n_views": 18,
+        "median_score": 0.642578125,
+        "width_m": 0.19845556894938152,
+        "length_m": 0.22739702860514324,
+        "mean_mask_diameter_cm": 10.480910916016164
+      }
+    },
+    {
+      "id": 55,
+      "class": "downlight",
+      "index": 7,
+      "centroid_px": [
+        711.0,
+        1011.5
+      ],
+      "length_px": 32.0,
+      "width_px": 19.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 7,
+        "concept": "light",
+        "n_views": 15,
+        "median_score": 0.609375,
+        "width_m": 0.12666666666666668,
+        "length_m": 0.21333333333333335,
+        "mean_mask_diameter_cm": 10.734278094415824
+      }
+    },
+    {
+      "id": 56,
+      "class": "downlight",
+      "index": 8,
+      "centroid_px": [
+        384.0,
+        660.0
+      ],
+      "length_px": 34.0,
+      "width_px": 34.0,
+      "angle_deg": 90.0,
+      "source": {
+        "cluster_id": 8,
+        "concept": "light",
+        "n_views": 13,
+        "median_score": 0.65625,
+        "width_m": 0.22666666666666666,
+        "length_m": 0.22666666666666666,
+        "mean_mask_diameter_cm": 13.956372273317214
+      }
+    },
+    {
+      "id": 57,
+      "class": "downlight",
+      "index": 9,
+      "centroid_px": [
+        712.5,
+        661.5
+      ],
+      "length_px": 37.0,
+      "width_px": 33.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 9,
+        "concept": "light",
+        "n_views": 26,
+        "median_score": 0.62890625,
+        "width_m": 0.22,
+        "length_m": 0.24666666666666667,
+        "mean_mask_diameter_cm": 11.134469718916563
+      }
+    },
+    {
+      "id": 58,
+      "class": "downlight",
+      "index": 10,
+      "centroid_px": [
+        388.0,
+        417.0
+      ],
+      "length_px": 32.0,
+      "width_px": 30.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 10,
+        "concept": "light",
+        "n_views": 5,
+        "median_score": 0.56640625,
+        "width_m": 0.2,
+        "length_m": 0.21333333333333335,
+        "mean_mask_diameter_cm": 13.01626681107709
+      }
+    },
+    {
+      "id": 59,
+      "class": "downlight",
+      "index": 11,
+      "centroid_px": [
+        716.0,
+        408.0
+      ],
+      "length_px": 36.0,
+      "width_px": 24.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 11,
+        "concept": "light",
+        "n_views": 14,
+        "median_score": 0.57421875,
+        "width_m": 0.16,
+        "length_m": 0.24,
+        "mean_mask_diameter_cm": 9.415679097890768
+      }
+    },
+    {
+      "id": 60,
+      "class": "downlight",
+      "index": 12,
+      "centroid_px": [
+        878.0000038146973,
+        657.5
+      ],
+      "length_px": 31.819805145263672,
+      "width_px": 23.33452033996582,
+      "angle_deg": 135.0,
+      "source": {
+        "cluster_id": 12,
+        "concept": "light",
+        "n_views": 7,
+        "median_score": 0.53515625,
+        "width_m": 0.15556346893310546,
+        "length_m": 0.2121320343017578,
+        "mean_mask_diameter_cm": 14.38169721675117
+      }
+    },
+    {
+      "id": 61,
+      "class": "downlight",
+      "index": 13,
+      "centroid_px": [
+        1047.5,
+        660.0
+      ],
+      "length_px": 57.0,
+      "width_px": 28.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 13,
+        "concept": "light",
+        "n_views": 16,
+        "median_score": 0.638671875,
+        "width_m": 0.18666666666666668,
+        "length_m": 0.38,
+        "mean_mask_diameter_cm": 12.32032532746462
+      }
+    },
+    {
+      "id": 62,
+      "class": "downlight",
+      "index": 14,
+      "centroid_px": [
+        1047.0,
+        413.5
+      ],
+      "length_px": 46.0,
+      "width_px": 31.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 14,
+        "concept": "light",
+        "n_views": 11,
+        "median_score": 0.73828125,
+        "width_m": 0.20666666666666667,
+        "length_m": 0.30666666666666664,
+        "mean_mask_diameter_cm": 12.737117751424515
+      }
+    },
+    {
+      "id": 63,
+      "class": "downlight",
+      "index": 15,
+      "centroid_px": [
+        1369.8648681640625,
+        671.1891899108887
+      ],
+      "length_px": 55.89565658569336,
+      "width_px": 22.029464721679688,
+      "angle_deg": 170.5376739501953,
+      "source": {
+        "cluster_id": 15,
+        "concept": "light",
+        "n_views": 9,
+        "median_score": 0.73828125,
+        "width_m": 0.14686309814453125,
+        "length_m": 0.3726377105712891,
+        "mean_mask_diameter_cm": 13.157243015034222
+      }
+    },
+    {
+      "id": 64,
+      "class": "downlight",
+      "index": 16,
+      "centroid_px": [
+        1366.859992980957,
+        428.0200004577637
+      ],
+      "length_px": 56.28570556640625,
+      "width_px": 20.36467742919922,
+      "angle_deg": 171.8698959350586,
+      "source": {
+        "cluster_id": 16,
+        "concept": "light",
+        "n_views": 13,
+        "median_score": 0.66796875,
+        "width_m": 0.13576451619466146,
+        "length_m": 0.375238037109375,
+        "mean_mask_diameter_cm": 11.772425489400609
+      }
+    },
+    {
+      "id": 65,
+      "class": "downlight",
+      "index": 17,
+      "centroid_px": [
+        1625.5,
+        432.0
+      ],
+      "length_px": 55.0,
+      "width_px": 20.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 17,
+        "concept": "light",
+        "n_views": 13,
+        "median_score": 0.6796875,
+        "width_m": 0.13333333333333333,
+        "length_m": 0.36666666666666664,
+        "mean_mask_diameter_cm": 11.940693415650813
+      }
+    },
+    {
+      "id": 66,
+      "class": "downlight",
+      "index": 18,
+      "centroid_px": [
+        1637.8948669433594,
+        603.9657707214355
+      ],
+      "length_px": 60.621803283691406,
+      "width_px": 26.701282501220703,
+      "angle_deg": 171.46923065185547,
+      "source": {
+        "cluster_id": 18,
+        "concept": "light",
+        "n_views": 9,
+        "median_score": 0.80078125,
+        "width_m": 0.17800855000813803,
+        "length_m": 0.40414535522460937,
+        "mean_mask_diameter_cm": 12.13607047413036
+      }
+    },
+    {
+      "id": 67,
+      "class": "downlight",
+      "index": 19,
+      "centroid_px": [
+        1609.10498046875,
+        792.7453212738037
+      ],
+      "length_px": 118.19656372070312,
+      "width_px": 21.214771270751953,
+      "angle_deg": 1.8476102352142334,
+      "source": {
+        "cluster_id": 19,
+        "concept": "light",
+        "n_views": 12,
+        "median_score": 0.896484375,
+        "width_m": 0.1414318084716797,
+        "length_m": 0.7879770914713542,
+        "mean_mask_diameter_cm": 18.684521812405304
+      }
+    },
+    {
+      "id": 68,
+      "class": "downlight",
+      "index": 20,
+      "centroid_px": [
+        1884.8121795654297,
+        432.3705596923828
+      ],
+      "length_px": 56.28517150878906,
+      "width_px": 25.50644302368164,
+      "angle_deg": 175.9143829345703,
+      "source": {
+        "cluster_id": 20,
+        "concept": "light",
+        "n_views": 8,
+        "median_score": 0.79296875,
+        "width_m": 0.17004295349121093,
+        "length_m": 0.3752344767252604,
+        "mean_mask_diameter_cm": 13.536485111061555
+      }
+    },
+    {
+      "id": 69,
+      "class": "downlight",
+      "index": 21,
+      "centroid_px": [
+        1888.278247833252,
+        676.5626926422119
+      ],
+      "length_px": 62.482994079589844,
+      "width_px": 32.25551986694336,
+      "angle_deg": 176.3086166381836,
+      "source": {
+        "cluster_id": 21,
+        "concept": "light",
+        "n_views": 16,
+        "median_score": 0.783203125,
+        "width_m": 0.21503679911295573,
+        "length_m": 0.4165532938639323,
+        "mean_mask_diameter_cm": 13.598090892681464
+      }
+    },
+    {
+      "id": 70,
+      "class": "downlight",
+      "index": 22,
+      "centroid_px": [
+        1885.7935943603516,
+        1036.0604991912842
+      ],
+      "length_px": 62.1605110168457,
+      "width_px": 31.617149353027344,
+      "angle_deg": 17.35402488708496,
+      "source": {
+        "cluster_id": 22,
+        "concept": "light",
+        "n_views": 17,
+        "median_score": 0.68359375,
+        "width_m": 0.21078099568684897,
+        "length_m": 0.41440340677897136,
+        "mean_mask_diameter_cm": 14.22704529831344
+      }
+    },
+    {
+      "id": 71,
+      "class": "downlight",
+      "index": 23,
+      "centroid_px": [
+        1614.1120719909668,
+        968.5948333740234
+      ],
+      "length_px": 22.059484481811523,
+      "width_px": 20.877727508544922,
+      "angle_deg": 156.80140686035156,
+      "source": {
+        "cluster_id": 23,
+        "concept": "light",
+        "n_views": 10,
+        "median_score": 0.740234375,
+        "width_m": 0.13918485005696615,
+        "length_m": 0.14706322987874348,
+        "mean_mask_diameter_cm": 9.14790644900529
+      }
+    },
+    {
+      "id": 72,
+      "class": "downlight",
+      "index": 24,
+      "centroid_px": [
+        1879.4402656555176,
+        1383.3960189819336
+      ],
+      "length_px": 38.04887008666992,
+      "width_px": 25.34374237060547,
+      "angle_deg": 3.8140745162963867,
+      "source": {
+        "cluster_id": 24,
+        "concept": "light",
+        "n_views": 4,
+        "median_score": 0.673828125,
+        "width_m": 0.16895828247070313,
+        "length_m": 0.2536591339111328,
+        "mean_mask_diameter_cm": 16.53392528189239
+      }
+    },
+    {
+      "id": 73,
+      "class": "downlight",
+      "index": 25,
+      "centroid_px": [
+        1614.0,
+        1324.0
+      ],
+      "length_px": 36.0,
+      "width_px": 24.0,
+      "angle_deg": 90.0,
+      "source": {
+        "cluster_id": 25,
+        "concept": "light",
+        "n_views": 4,
+        "median_score": 0.7890625,
+        "width_m": 0.16,
+        "length_m": 0.24,
+        "mean_mask_diameter_cm": 19.500181846924402
+      }
+    },
+    {
+      "id": 74,
+      "class": "downlight",
+      "index": 26,
+      "centroid_px": [
+        1878.0,
+        1736.0
+      ],
+      "length_px": 50.0,
+      "width_px": 34.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 26,
+        "concept": "light",
+        "n_views": 17,
+        "median_score": 0.640625,
+        "width_m": 0.22666666666666666,
+        "length_m": 0.3333333333333333,
+        "mean_mask_diameter_cm": 13.311565241413224
+      }
+    },
+    {
+      "id": 75,
+      "class": "downlight",
+      "index": 27,
+      "centroid_px": [
+        1574.5,
+        1832.5
+      ],
+      "length_px": 95.0,
+      "width_px": 11.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 27,
+        "concept": "light",
+        "n_views": 5,
+        "median_score": 0.76953125,
+        "width_m": 0.07333333333333333,
+        "length_m": 0.6333333333333333,
+        "mean_mask_diameter_cm": 15.137764049482753
+      }
+    },
+    {
+      "id": 76,
+      "class": "downlight",
+      "index": 28,
+      "centroid_px": [
+        1881.5,
+        2089.5
+      ],
+      "length_px": 51.0,
+      "width_px": 39.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 28,
+        "concept": "light",
+        "n_views": 13,
+        "median_score": 0.6640625,
+        "width_m": 0.26,
+        "length_m": 0.34,
+        "mean_mask_diameter_cm": 12.664476246911441
+      }
+    },
+    {
+      "id": 77,
+      "class": "downlight",
+      "index": 29,
+      "centroid_px": [
+        1612.100004196167,
+        2022.1999988555908
+      ],
+      "length_px": 40.24921798706055,
+      "width_px": 33.541019439697266,
+      "angle_deg": 153.43495178222656,
+      "source": {
+        "cluster_id": 29,
+        "concept": "light",
+        "n_views": 20,
+        "median_score": 0.72265625,
+        "width_m": 0.22360679626464844,
+        "length_m": 0.268328119913737,
+        "mean_mask_diameter_cm": 9.926783448348646
+      }
+    },
+    {
+      "id": 78,
+      "class": "downlight",
+      "index": 30,
+      "centroid_px": [
+        1551.2213897705078,
+        2205.545965194702
+      ],
+      "length_px": 131.41712951660156,
+      "width_px": 35.60477066040039,
+      "angle_deg": 175.03025817871094,
+      "source": {
+        "cluster_id": 30,
+        "concept": "light",
+        "n_views": 7,
+        "median_score": 0.72265625,
+        "width_m": 0.2373651377360026,
+        "length_m": 0.8761141967773437,
+        "mean_mask_diameter_cm": 19.727793654390194
+      }
+    },
+    {
+      "id": 79,
+      "class": "led_strip_panel",
+      "index": 1,
+      "centroid_px": [
+        1517.3212661743164,
+        2206.246608734131
+      ],
+      "length_px": 200.8676300048828,
+      "width_px": 45.61498260498047,
+      "angle_deg": 177.27368927001953,
+      "source": {
+        "cluster_id": 31,
+        "concept": "light",
+        "n_views": 16,
+        "median_score": 0.84765625,
+        "width_m": 0.30409988403320315,
+        "length_m": 1.3391175333658853,
+        "mean_mask_diameter_cm": 29.586966785630477
+      }
+    },
+    {
+      "id": 80,
+      "class": "led_strip_panel",
+      "index": 2,
+      "centroid_px": [
+        1518.572624206543,
+        1864.1872253417969
+      ],
+      "length_px": 185.39175415039062,
+      "width_px": 40.01241683959961,
+      "angle_deg": 178.45184326171875,
+      "source": {
+        "cluster_id": 32,
+        "concept": "light",
+        "n_views": 7,
+        "median_score": 0.7890625,
+        "width_m": 0.2667494455973307,
+        "length_m": 1.2359450276692707,
+        "mean_mask_diameter_cm": 32.60268420085256
+      }
+    },
+    {
+      "id": 81,
+      "class": "downlight",
+      "index": 31,
+      "centroid_px": [
+        1266.7929916381836,
+        2037.7961769104004
+      ],
+      "length_px": 90.54940795898438,
+      "width_px": 31.26578140258789,
+      "angle_deg": 145.17551040649414,
+      "source": {
+        "cluster_id": 33,
+        "concept": "light",
+        "n_views": 13,
+        "median_score": 0.78515625,
+        "width_m": 0.20843854268391926,
+        "length_m": 0.6036627197265625,
+        "mean_mask_diameter_cm": 13.390008070765264
+      }
+    },
+    {
+      "id": 82,
+      "class": "downlight",
+      "index": 32,
+      "centroid_px": [
+        1611.4092559814453,
+        1682.1903915405273
+      ],
+      "length_px": 42.815189361572266,
+      "width_px": 26.2796688079834,
+      "angle_deg": 62.35402297973633,
+      "source": {
+        "cluster_id": 34,
+        "concept": "light",
+        "n_views": 10,
+        "median_score": 0.75,
+        "width_m": 0.17519779205322267,
+        "length_m": 0.2854345957438151,
+        "mean_mask_diameter_cm": 9.149948464726954
+      }
+    },
+    {
+      "id": 83,
+      "class": "downlight",
+      "index": 33,
+      "centroid_px": [
+        1283.613826751709,
+        1658.7647552490234
+      ],
+      "length_px": 46.48567199707031,
+      "width_px": 40.28484344482422,
+      "angle_deg": 160.82098388671875,
+      "source": {
+        "cluster_id": 35,
+        "concept": "light",
+        "n_views": 19,
+        "median_score": 0.73046875,
+        "width_m": 0.2685656229654948,
+        "length_m": 0.30990447998046877,
+        "mean_mask_diameter_cm": 9.138427162321168
+      }
+    },
+    {
+      "id": 84,
+      "class": "led_strip_panel",
+      "index": 3,
+      "centroid_px": [
+        1372.0115966796875,
+        1852.1631317138672
+      ],
+      "length_px": 475.98492431640625,
+      "width_px": 25.251245498657227,
+      "angle_deg": 0.15319691598415375,
+      "source": {
+        "cluster_id": 36,
+        "concept": "light",
+        "n_views": 6,
+        "median_score": 0.8828125,
+        "width_m": 0.16834163665771484,
+        "length_m": 3.1732328287760416,
+        "mean_mask_diameter_cm": 44.19329163986877
+      }
+    },
+    {
+      "id": 85,
+      "class": "downlight",
+      "index": 34,
+      "centroid_px": [
+        1025.0173034667969,
+        1626.0941772460938
+      ],
+      "length_px": 776.2510375976562,
+      "width_px": 178.05599975585938,
+      "angle_deg": 68.75769805908203,
+      "source": {
+        "cluster_id": 37,
+        "concept": "light",
+        "n_views": 19,
+        "median_score": 0.62109375,
+        "width_m": 1.1870399983723958,
+        "length_m": 5.175006917317709,
+        "mean_mask_diameter_cm": 14.5033351439557
+      }
+    },
+    {
+      "id": 86,
+      "class": "led_strip_panel",
+      "index": 4,
+      "centroid_px": [
+        1438.0,
+        1484.0
+      ],
+      "length_px": 154.0,
+      "width_px": 18.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 38,
+        "concept": "light",
+        "n_views": 3,
+        "median_score": 0.83203125,
+        "width_m": 0.12,
+        "length_m": 1.0266666666666666,
+        "mean_mask_diameter_cm": 28.329669013481563
+      }
+    },
+    {
+      "id": 87,
+      "class": "led_strip_panel",
+      "index": 5,
+      "centroid_px": [
+        1242.9999389648438,
+        1473.4999961853027
+      ],
+      "length_px": 731.9998779296875,
+      "width_px": 42.99999237060547,
+      "angle_deg": -0.0,
+      "source": {
+        "cluster_id": 39,
+        "concept": "light",
+        "n_views": 6,
+        "median_score": 0.90234375,
+        "width_m": 0.28666661580403646,
+        "length_m": 4.879999186197916,
+        "mean_mask_diameter_cm": 54.30514013641756
+      }
+    },
+    {
+      "id": 88,
+      "class": "downlight",
+      "index": 35,
+      "centroid_px": [
+        1172.4138450622559,
+        1835.4492301940918
+      ],
+      "length_px": 73.5532455444336,
+      "width_px": 13.035454750061035,
+      "angle_deg": 176.8201675415039,
+      "source": {
+        "cluster_id": 40,
+        "concept": "light",
+        "n_views": 5,
+        "median_score": 0.81640625,
+        "width_m": 0.08690303166707357,
+        "length_m": 0.49035497029622394,
+        "mean_mask_diameter_cm": 15.978601310098133
+      }
+    },
+    {
+      "id": 89,
+      "class": "downlight",
+      "index": 36,
+      "centroid_px": [
+        1269.75,
+        1312.2499961853027
+      ],
+      "length_px": 59.39696502685547,
+      "width_px": 40.305084228515625,
+      "angle_deg": 45.0,
+      "source": {
+        "cluster_id": 41,
+        "concept": "light",
+        "n_views": 15,
+        "median_score": 0.60546875,
+        "width_m": 0.2687005615234375,
+        "length_m": 0.39597976684570313,
+        "mean_mask_diameter_cm": 8.91118031132728
+      }
+    },
+    {
+      "id": 90,
+      "class": "downlight",
+      "index": 37,
+      "centroid_px": [
+        1602.8490562438965,
+        1292.5283012390137
+      ],
+      "length_px": 29.12043571472168,
+      "width_px": 19.779918670654297,
+      "angle_deg": 105.94539546966553,
+      "source": {
+        "cluster_id": 42,
+        "concept": "light",
+        "n_views": 5,
+        "median_score": 0.8046875,
+        "width_m": 0.13186612447102863,
+        "length_m": 0.19413623809814454,
+        "mean_mask_diameter_cm": 10.862390492771313
+      }
+    },
+    {
+      "id": 91,
+      "class": "led_strip_panel",
+      "index": 6,
+      "centroid_px": [
+        1294.4800567626953,
+        1119.6729011535645
+      ],
+      "length_px": 460.9766845703125,
+      "width_px": 26.73243522644043,
+      "angle_deg": 179.7359619140625,
+      "source": {
+        "cluster_id": 43,
+        "concept": "light",
+        "n_views": 3,
+        "median_score": 0.71875,
+        "width_m": 0.1782162348429362,
+        "length_m": 3.0731778971354164,
+        "mean_mask_diameter_cm": 47.16610508182379
+      }
+    },
+    {
+      "id": 92,
+      "class": "downlight",
+      "index": 38,
+      "centroid_px": [
+        1278.3230781555176,
+        952.3153839111328
+      ],
+      "length_px": 37.582523345947266,
+      "width_px": 18.35713768005371,
+      "angle_deg": 60.2551155090332,
+      "source": {
+        "cluster_id": 44,
+        "concept": "light",
+        "n_views": 8,
+        "median_score": 0.6875,
+        "width_m": 0.12238091786702474,
+        "length_m": 0.25055015563964844,
+        "mean_mask_diameter_cm": 10.476897761434028
+      }
+    },
+    {
+      "id": 93,
+      "class": "led_strip_panel",
+      "index": 7,
+      "centroid_px": [
+        1334.5337524414062,
+        1118.1251373291016
+      ],
+      "length_px": 539.0238037109375,
+      "width_px": 29.777984619140625,
+      "angle_deg": 0.23103013634681702,
+      "source": {
+        "cluster_id": 45,
+        "concept": "light",
+        "n_views": 3,
+        "median_score": 0.8203125,
+        "width_m": 0.1985198974609375,
+        "length_m": 3.593492024739583,
+        "mean_mask_diameter_cm": 53.76464022363866
+      }
+    },
+    {
+      "id": 94,
+      "class": "downlight",
+      "index": 39,
+      "centroid_px": [
+        1000.0,
+        1014.5
+      ],
+      "length_px": 40.0,
+      "width_px": 23.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 46,
+        "concept": "light",
+        "n_views": 5,
+        "median_score": 0.6796875,
+        "width_m": 0.15333333333333332,
+        "length_m": 0.26666666666666666,
+        "mean_mask_diameter_cm": 12.28098175604221
+      }
+    },
+    {
+      "id": 95,
+      "class": "downlight",
+      "index": 40,
+      "centroid_px": [
+        1035.0086517333984,
+        1320.1712799072266
+      ],
+      "length_px": 58.76470947265625,
+      "width_px": 51.23529815673828,
+      "angle_deg": 118.07248497009277,
+      "source": {
+        "cluster_id": 47,
+        "concept": "light",
+        "n_views": 13,
+        "median_score": 0.640625,
+        "width_m": 0.34156865437825523,
+        "length_m": 0.3917647298177083,
+        "mean_mask_diameter_cm": 9.43803675179867
+      }
+    },
+    {
+      "id": 96,
+      "class": "led_strip_panel",
+      "index": 8,
+      "centroid_px": [
+        1149.5,
+        1131.5
+      ],
+      "length_px": 159.0,
+      "width_px": 11.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 48,
+        "concept": "light",
+        "n_views": 5,
+        "median_score": 0.7890625,
+        "width_m": 0.07333333333333333,
+        "length_m": 1.06,
+        "mean_mask_diameter_cm": 25.744454395799153
+      }
+    },
+    {
+      "id": 97,
+      "class": "led_strip_panel",
+      "index": 9,
+      "centroid_px": [
+        1041.6306610107422,
+        1503.3343048095703
+      ],
+      "length_px": 316.5330505371094,
+      "width_px": 46.14531326293945,
+      "angle_deg": 178.45184326171875,
+      "source": {
+        "cluster_id": 49,
+        "concept": "light",
+        "n_views": 5,
+        "median_score": 0.7890625,
+        "width_m": 0.3076354217529297,
+        "length_m": 2.1102203369140624,
+        "mean_mask_diameter_cm": 36.17012545492261
+      }
+    },
+    {
+      "id": 98,
+      "class": "led_strip_panel",
+      "index": 10,
+      "centroid_px": [
+        1497.9807205200195,
+        1507.8704891204834
+      ],
+      "length_px": 234.06959533691406,
+      "width_px": 26.57973861694336,
+      "angle_deg": 179.64632415771484,
+      "source": {
+        "cluster_id": 50,
+        "concept": "light",
+        "n_views": 6,
+        "median_score": 0.779296875,
+        "width_m": 0.17719825744628906,
+        "length_m": 1.5604639689127604,
+        "mean_mask_diameter_cm": 35.91675875690777
+      }
+    },
+    {
+      "id": 99,
+      "class": "downlight",
+      "index": 41,
+      "centroid_px": [
+        1629.0427627563477,
+        2382.1680870056152
+      ],
+      "length_px": 73.44459533691406,
+      "width_px": 46.102508544921875,
+      "angle_deg": 168.90628051757812,
+      "source": {
+        "cluster_id": 51,
+        "concept": "light",
+        "n_views": 20,
+        "median_score": 0.68359375,
+        "width_m": 0.3073500569661458,
+        "length_m": 0.4896306355794271,
+        "mean_mask_diameter_cm": 9.241604352530196
+      }
+    },
+    {
+      "id": 100,
+      "class": "downlight",
+      "index": 42,
+      "centroid_px": [
+        1875.1900100708008,
+        2444.3299980163574
+      ],
+      "length_px": 60.10407638549805,
+      "width_px": 41.2950325012207,
+      "angle_deg": 81.8698959350586,
+      "source": {
+        "cluster_id": 52,
+        "concept": "light",
+        "n_views": 7,
+        "median_score": 0.72265625,
+        "width_m": 0.2753002166748047,
+        "length_m": 0.40069384256998697,
+        "mean_mask_diameter_cm": 12.296332265320519
+      }
+    },
+    {
+      "id": 101,
+      "class": "downlight",
+      "index": 43,
+      "centroid_px": [
+        1353.5764770507812,
+        2429.9058837890625
+      ],
+      "length_px": 85.90447235107422,
+      "width_px": 46.42312240600586,
+      "angle_deg": 12.528807640075684,
+      "source": {
+        "cluster_id": 53,
+        "concept": "light",
+        "n_views": 46,
+        "median_score": 0.630859375,
+        "width_m": 0.30948748270670573,
+        "length_m": 0.5726964823404948,
+        "mean_mask_diameter_cm": 12.545420555770399
+      }
+    },
+    {
+      "id": 102,
+      "class": "downlight",
+      "index": 44,
+      "centroid_px": [
+        1013.603458404541,
+        2070.758623123169
+      ],
+      "length_px": 67.47160339355469,
+      "width_px": 35.05705261230469,
+      "angle_deg": 176.633544921875,
+      "source": {
+        "cluster_id": 54,
+        "concept": "light",
+        "n_views": 26,
+        "median_score": 0.78125,
+        "width_m": 0.23371368408203125,
+        "length_m": 0.4498106892903646,
+        "mean_mask_diameter_cm": 13.368770922853507
+      }
+    },
+    {
+      "id": 103,
+      "class": "led_strip_panel",
+      "index": 11,
+      "centroid_px": [
+        1109.0176544189453,
+        1475.5180130004883
+      ],
+      "length_px": 476.1148681640625,
+      "width_px": 24.67758560180664,
+      "angle_deg": 0.5115558505058289,
+      "source": {
+        "cluster_id": 55,
+        "concept": "light",
+        "n_views": 3,
+        "median_score": 0.76953125,
+        "width_m": 0.1645172373453776,
+        "length_m": 3.17409912109375,
+        "mean_mask_diameter_cm": 44.36458149463616
+      }
+    },
+    {
+      "id": 104,
+      "class": "downlight",
+      "index": 45,
+      "centroid_px": [
+        1611.1040878295898,
+        1650.5353164672852
+      ],
+      "length_px": 43.026832580566406,
+      "width_px": 28.02349090576172,
+      "angle_deg": 7.431407928466797,
+      "source": {
+        "cluster_id": 56,
+        "concept": "light",
+        "n_views": 9,
+        "median_score": 0.84375,
+        "width_m": 0.18682327270507812,
+        "length_m": 0.28684555053710936,
+        "mean_mask_diameter_cm": 16.70734033308354
+      }
+    },
+    {
+      "id": 105,
+      "class": "downlight",
+      "index": 46,
+      "centroid_px": [
+        697.3865966796875,
+        1707.4948406219482
+      ],
+      "length_px": 48.31857681274414,
+      "width_px": 44.5851936340332,
+      "angle_deg": 111.03751182556152,
+      "source": {
+        "cluster_id": 57,
+        "concept": "light",
+        "n_views": 21,
+        "median_score": 0.68359375,
+        "width_m": 0.297234624226888,
+        "length_m": 0.32212384541829425,
+        "mean_mask_diameter_cm": 13.142108272486649
+      }
+    },
+    {
+      "id": 106,
+      "class": "downlight",
+      "index": 47,
+      "centroid_px": [
+        684.060001373291,
+        2019.920000076294
+      ],
+      "length_px": 41.0,
+      "width_px": 32.79999923706055,
+      "angle_deg": 126.8698959350586,
+      "source": {
+        "cluster_id": 58,
+        "concept": "light",
+        "n_views": 6,
+        "median_score": 0.546875,
+        "width_m": 0.21866666158040365,
+        "length_m": 0.2733333333333333,
+        "mean_mask_diameter_cm": 11.694964892951624
+      }
+    },
+    {
+      "id": 107,
+      "class": "downlight",
+      "index": 48,
+      "centroid_px": [
+        1004.2109527587891,
+        2417.3803272247314
+      ],
+      "length_px": 56.70250701904297,
+      "width_px": 45.30796432495117,
+      "angle_deg": 172.23483276367188,
+      "source": {
+        "cluster_id": 59,
+        "concept": "light",
+        "n_views": 31,
+        "median_score": 0.74609375,
+        "width_m": 0.30205309549967446,
+        "length_m": 0.3780167134602865,
+        "mean_mask_diameter_cm": 13.305091047644119
+      }
+    },
+    {
+      "id": 108,
+      "class": "downlight",
+      "index": 49,
+      "centroid_px": [
+        682.0,
+        2063.5
+      ],
+      "length_px": 54.0,
+      "width_px": 35.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 60,
+        "concept": "light",
+        "n_views": 20,
+        "median_score": 0.779296875,
+        "width_m": 0.23333333333333334,
+        "length_m": 0.36,
+        "mean_mask_diameter_cm": 12.815215961067894
+      }
+    },
+    {
+      "id": 109,
+      "class": "downlight",
+      "index": 50,
+      "centroid_px": [
+        674.6817054748535,
+        2411.9353637695312
+      ],
+      "length_px": 59.41193389892578,
+      "width_px": 44.94169616699219,
+      "angle_deg": 20.2248592376709,
+      "source": {
+        "cluster_id": 61,
+        "concept": "light",
+        "n_views": 18,
+        "median_score": 0.724609375,
+        "width_m": 0.29961130777994793,
+        "length_m": 0.3960795593261719,
+        "mean_mask_diameter_cm": 12.431424621015221
+      }
+    },
+    {
+      "id": 110,
+      "class": "downlight",
+      "index": 51,
+      "centroid_px": [
+        990.5675678253174,
+        2771.0946006774902
+      ],
+      "length_px": 63.827579498291016,
+      "width_px": 48.1402702331543,
+      "angle_deg": 60.80251693725586,
+      "source": {
+        "cluster_id": 62,
+        "concept": "light",
+        "n_views": 20,
+        "median_score": 0.73828125,
+        "width_m": 0.3209351348876953,
+        "length_m": 0.42551719665527343,
+        "mean_mask_diameter_cm": 11.968137176866653
+      }
+    },
+    {
+      "id": 111,
+      "class": "downlight",
+      "index": 52,
+      "centroid_px": [
+        1877.9948272705078,
+        2815.0879306793213
+      ],
+      "length_px": 36.64254379272461,
+      "width_px": 20.72887420654297,
+      "angle_deg": 3.3664608001708984,
+      "source": {
+        "cluster_id": 63,
+        "concept": "light",
+        "n_views": 27,
+        "median_score": 0.65625,
+        "width_m": 0.13819249471028647,
+        "length_m": 0.24428362528483072,
+        "mean_mask_diameter_cm": 7.988689103562148
+      }
+    },
+    {
+      "id": 112,
+      "class": "downlight",
+      "index": 53,
+      "centroid_px": [
+        1871.5,
+        3008.5
+      ],
+      "length_px": 27.0,
+      "width_px": 25.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 64,
+        "concept": "light",
+        "n_views": 4,
+        "median_score": 0.541015625,
+        "width_m": 0.16666666666666666,
+        "length_m": 0.18,
+        "mean_mask_diameter_cm": 9.923652281127122
+      }
+    },
+    {
+      "id": 113,
+      "class": "downlight",
+      "index": 54,
+      "centroid_px": [
+        1864.270492553711,
+        3172.0245933532715
+      ],
+      "length_px": 59.79322814941406,
+      "width_px": 33.67369842529297,
+      "angle_deg": 50.194427490234375,
+      "source": {
+        "cluster_id": 65,
+        "concept": "light",
+        "n_views": 26,
+        "median_score": 0.599609375,
+        "width_m": 0.22449132283528647,
+        "length_m": 0.39862152099609377,
+        "mean_mask_diameter_cm": 8.52878385642043
+      }
+    },
+    {
+      "id": 114,
+      "class": "downlight",
+      "index": 55,
+      "centroid_px": [
+        1573.6291885375977,
+        3012.7025756835938
+      ],
+      "length_px": 71.3990707397461,
+      "width_px": 30.001087188720703,
+      "angle_deg": 5.042450904846191,
+      "source": {
+        "cluster_id": 66,
+        "concept": "light",
+        "n_views": 9,
+        "median_score": 0.55859375,
+        "width_m": 0.20000724792480468,
+        "length_m": 0.4759938049316406,
+        "mean_mask_diameter_cm": 10.238290804155435
+      }
+    },
+    {
+      "id": 115,
+      "class": "downlight",
+      "index": 56,
+      "centroid_px": [
+        1595.980354309082,
+        3099.1026191711426
+      ],
+      "length_px": 47.38069152832031,
+      "width_px": 21.87309455871582,
+      "angle_deg": 172.40535736083984,
+      "source": {
+        "cluster_id": 67,
+        "concept": "light",
+        "n_views": 7,
+        "median_score": 0.7421875,
+        "width_m": 0.1458206303914388,
+        "length_m": 0.31587127685546873,
+        "mean_mask_diameter_cm": 8.076782297939781
+      }
+    },
+    {
+      "id": 116,
+      "class": "led_strip_panel",
+      "index": 12,
+      "centroid_px": [
+        1355.3385314941406,
+        3259.328437805176
+      ],
+      "length_px": 502.58746337890625,
+      "width_px": 41.04176330566406,
+      "angle_deg": 1.7357046604156494,
+      "source": {
+        "cluster_id": 68,
+        "concept": "light",
+        "n_views": 6,
+        "median_score": 0.859375,
+        "width_m": 0.2736117553710937,
+        "length_m": 3.350583089192708,
+        "mean_mask_diameter_cm": 46.968982836972074
+      }
+    },
+    {
+      "id": 117,
+      "class": "led_strip_panel",
+      "index": 13,
+      "centroid_px": [
+        1494.4752502441406,
+        2925.619010925293
+      ],
+      "length_px": 183.6531524658203,
+      "width_px": 23.741018295288086,
+      "angle_deg": 2.2906100749969482,
+      "source": {
+        "cluster_id": 69,
+        "concept": "light",
+        "n_views": 11,
+        "median_score": 0.8984375,
+        "width_m": 0.15827345530192058,
+        "length_m": 1.2243543497721354,
+        "mean_mask_diameter_cm": 24.0710005935426
+      }
+    },
+    {
+      "id": 118,
+      "class": "downlight",
+      "index": 57,
+      "centroid_px": [
+        1597.5,
+        2748.0
+      ],
+      "length_px": 29.0,
+      "width_px": 16.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 70,
+        "concept": "light",
+        "n_views": 6,
+        "median_score": 0.740234375,
+        "width_m": 0.10666666666666667,
+        "length_m": 0.19333333333333333,
+        "mean_mask_diameter_cm": 8.178479615895743
+      }
+    },
+    {
+      "id": 119,
+      "class": "downlight",
+      "index": 58,
+      "centroid_px": [
+        1335.4184532165527,
+        2794.757511138916
+      ],
+      "length_px": 54.933631896972656,
+      "width_px": 24.229394912719727,
+      "angle_deg": 5.04245138168335,
+      "source": {
+        "cluster_id": 71,
+        "concept": "light",
+        "n_views": 20,
+        "median_score": 0.716796875,
+        "width_m": 0.16152929941813152,
+        "length_m": 0.36622421264648436,
+        "mean_mask_diameter_cm": 13.086753129605768
+      }
+    },
+    {
+      "id": 120,
+      "class": "downlight",
+      "index": 59,
+      "centroid_px": [
+        993.5,
+        3138.0
+      ],
+      "length_px": 49.0,
+      "width_px": 22.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 72,
+        "concept": "light",
+        "n_views": 12,
+        "median_score": 0.70703125,
+        "width_m": 0.14666666666666667,
+        "length_m": 0.32666666666666666,
+        "mean_mask_diameter_cm": 13.157551179252032
+      }
+    },
+    {
+      "id": 121,
+      "class": "downlight",
+      "index": 60,
+      "centroid_px": [
+        981.6000022888184,
+        3590.800001144409
+      ],
+      "length_px": 35.7770881652832,
+      "width_px": 25.043960571289062,
+      "angle_deg": 26.56505012512207,
+      "source": {
+        "cluster_id": 73,
+        "concept": "light",
+        "n_views": 10,
+        "median_score": 0.697265625,
+        "width_m": 0.16695973714192708,
+        "length_m": 0.23851392110188802,
+        "mean_mask_diameter_cm": 11.425003511111468
+      }
+    },
+    {
+      "id": 122,
+      "class": "led_strip_panel",
+      "index": 14,
+      "centroid_px": [
+        1256.0021057128906,
+        3266.4370460510254
+      ],
+      "length_px": 280.21148681640625,
+      "width_px": 15.050321578979492,
+      "angle_deg": 1.9251835346221924,
+      "source": {
+        "cluster_id": 74,
+        "concept": "light",
+        "n_views": 4,
+        "median_score": 0.859375,
+        "width_m": 0.10033547719319662,
+        "length_m": 1.8680765787760416,
+        "mean_mask_diameter_cm": 35.80600491087792
+      }
+    },
+    {
+      "id": 123,
+      "class": "downlight",
+      "index": 61,
+      "centroid_px": [
+        1040.189998626709,
+        3601.6700019836426
+      ],
+      "length_px": 36.48670959472656,
+      "width_px": 32.668338775634766,
+      "angle_deg": 8.13010311126709,
+      "source": {
+        "cluster_id": 75,
+        "concept": "light",
+        "n_views": 3,
+        "median_score": 0.5859375,
+        "width_m": 0.21778892517089843,
+        "length_m": 0.24324473063151042,
+        "mean_mask_diameter_cm": 17.791349698941605
+      }
+    },
+    {
+      "id": 124,
+      "class": "downlight",
+      "index": 62,
+      "centroid_px": [
+        1591.2500019073486,
+        3456.25
+      ],
+      "length_px": 27.577163696289062,
+      "width_px": 14.142135620117188,
+      "angle_deg": 45.0,
+      "source": {
+        "cluster_id": 76,
+        "concept": "light",
+        "n_views": 6,
+        "median_score": 0.529296875,
+        "width_m": 0.09428090413411458,
+        "length_m": 0.18384775797526043,
+        "mean_mask_diameter_cm": 7.831554909021049
+      }
+    },
+    {
+      "id": 125,
+      "class": "downlight",
+      "index": 63,
+      "centroid_px": [
+        655.1189651489258,
+        3121.977586746216
+      ],
+      "length_px": 38.0518684387207,
+      "width_px": 23.430086135864258,
+      "angle_deg": 3.3664605617523193,
+      "source": {
+        "cluster_id": 77,
+        "concept": "light",
+        "n_views": 6,
+        "median_score": 0.685546875,
+        "width_m": 0.15620057423909506,
+        "length_m": 0.2536791229248047,
+        "mean_mask_diameter_cm": 12.0159024356503
+      }
+    },
+    {
+      "id": 126,
+      "class": "downlight",
+      "index": 64,
+      "centroid_px": [
+        323.93041229248047,
+        3006.7809295654297
+      ],
+      "length_px": 21.179763793945312,
+      "width_px": 13.641204833984375,
+      "angle_deg": 111.03751182556152,
+      "source": {
+        "cluster_id": 78,
+        "concept": "light",
+        "n_views": 4,
+        "median_score": 0.80078125,
+        "width_m": 0.09094136555989583,
+        "length_m": 0.14119842529296875,
+        "mean_mask_diameter_cm": 10.833850525973812
+      }
+    },
+    {
+      "id": 127,
+      "class": "downlight",
+      "index": 65,
+      "centroid_px": [
+        665.5,
+        2768.5
+      ],
+      "length_px": 43.0,
+      "width_px": 21.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 79,
+        "concept": "light",
+        "n_views": 10,
+        "median_score": 0.72265625,
+        "width_m": 0.14,
+        "length_m": 0.2866666666666667,
+        "mean_mask_diameter_cm": 12.858851006890688
+      }
+    },
+    {
+      "id": 128,
+      "class": "diffuser",
+      "index": 1,
+      "centroid_px": [
+        372.41944122314453,
+        2222.0025939941406
+      ],
+      "length_px": 114.68228149414062,
+      "width_px": 114.65003967285156,
+      "angle_deg": 88.15238952636719,
+      "source": {
+        "cluster_id": 1,
+        "concept": "vent",
+        "n_views": 18,
+        "median_score": 0.919921875,
+        "width_m": 0.7643335978190104,
+        "length_m": 0.7645485432942708,
+        "mean_mask_diameter_cm": 49.13722809471266
+      }
+    },
+    {
+      "id": 129,
+      "class": "diffuser",
+      "index": 2,
+      "centroid_px": [
+        387.0,
+        1870.0
+      ],
+      "length_px": 122.0,
+      "width_px": 110.0,
+      "angle_deg": 90.0,
+      "source": {
+        "cluster_id": 2,
+        "concept": "vent",
+        "n_views": 19,
+        "median_score": 0.92578125,
+        "width_m": 0.7333333333333333,
+        "length_m": 0.8133333333333334,
+        "mean_mask_diameter_cm": 55.78431097233669
+      }
+    },
+    {
+      "id": 130,
+      "class": "diffuser",
+      "index": 3,
+      "centroid_px": [
+        392.0,
+        1539.5
+      ],
+      "length_px": 104.0,
+      "width_px": 103.0,
+      "angle_deg": 0.0,
+      "source": {
+        "cluster_id": 3,
+        "concept": "vent",
+        "n_views": 20,
+        "median_score": 0.91796875,
+        "width_m": 0.6866666666666666,
+        "length_m": 0.6933333333333334,
+        "mean_mask_diameter_cm": 46.5999534579375
+      }
+    },
+    {
+      "id": 131,
+      "class": "diffuser",
+      "index": 4,
+      "centroid_px": [
+        398.5,
+        1185.5
+      ],
+      "length_px": 101.0,
+      "width_px": 95.0,
+      "angle_deg": 90.0,
+      "source": {
+        "cluster_id": 4,
+        "concept": "vent",
+        "n_views": 13,
+        "median_score": 0.9140625,
+        "width_m": 0.6333333333333333,
+        "length_m": 0.6733333333333333,
+        "mean_mask_diameter_cm": 46.984621493969016
+      }
+    },
+    {
+      "id": 132,
+      "class": "diffuser",
+      "index": 5,
+      "centroid_px": [
+        397.5,
+        1530.0
+      ],
+      "length_px": 93.0,
+      "width_px": 66.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 5,
+        "concept": "vent",
+        "n_views": 3,
+        "median_score": 0.53515625,
+        "width_m": 0.44,
+        "length_m": 0.62,
+        "mean_mask_diameter_cm": 25.057896590319178
+      }
+    },
+    {
+      "id": 133,
+      "class": "diffuser",
+      "index": 6,
+      "centroid_px": [
+        717.1413955688477,
+        715.868221282959
+      ],
+      "length_px": 178.63839721679688,
+      "width_px": 95.78765106201172,
+      "angle_deg": 0.7117121815681458,
+      "source": {
+        "cluster_id": 6,
+        "concept": "vent",
+        "n_views": 12,
+        "median_score": 0.923828125,
+        "width_m": 0.6385843404134115,
+        "length_m": 1.1909226481119792,
+        "mean_mask_diameter_cm": 78.74717689002881
+      }
+    },
+    {
+      "id": 134,
+      "class": "diffuser",
+      "index": 7,
+      "centroid_px": [
+        558.5,
+        407.0
+      ],
+      "length_px": 98.0,
+      "width_px": 95.0,
+      "angle_deg": 90.0,
+      "source": {
+        "cluster_id": 7,
+        "concept": "vent",
+        "n_views": 6,
+        "median_score": 0.912109375,
+        "width_m": 0.6333333333333333,
+        "length_m": 0.6533333333333333,
+        "mean_mask_diameter_cm": 49.99547281997869
+      }
+    },
+    {
+      "id": 135,
+      "class": "diffuser",
+      "index": 8,
+      "centroid_px": [
+        686.5,
+        714.0
+      ],
+      "length_px": 119.0,
+      "width_px": 88.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 8,
+        "concept": "vent",
+        "n_views": 4,
+        "median_score": 0.87109375,
+        "width_m": 0.5866666666666667,
+        "length_m": 0.7933333333333333,
+        "mean_mask_diameter_cm": 45.949894007548224
+      }
+    },
+    {
+      "id": 136,
+      "class": "diffuser",
+      "index": 9,
+      "centroid_px": [
+        1137.0,
+        774.0
+      ],
+      "length_px": 134.0,
+      "width_px": 106.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 9,
+        "concept": "vent",
+        "n_views": 9,
+        "median_score": 0.921875,
+        "width_m": 0.7066666666666667,
+        "length_m": 0.8933333333333333,
+        "mean_mask_diameter_cm": 54.01654842158597
+      }
+    },
+    {
+      "id": 137,
+      "class": "diffuser",
+      "index": 10,
+      "centroid_px": [
+        1201.1677055358887,
+        422.2078399658203
+      ],
+      "length_px": 108.83102416992188,
+      "width_px": 98.69831085205078,
+      "angle_deg": 1.4144232273101807,
+      "source": {
+        "cluster_id": 10,
+        "concept": "vent",
+        "n_views": 7,
+        "median_score": 0.92578125,
+        "width_m": 0.6579887390136718,
+        "length_m": 0.7255401611328125,
+        "mean_mask_diameter_cm": 51.79513178279611
+      }
+    },
+    {
+      "id": 138,
+      "class": "diffuser",
+      "index": 11,
+      "centroid_px": [
+        1712.5,
+        431.5
+      ],
+      "length_px": 115.0,
+      "width_px": 95.0,
+      "angle_deg": 180.0,
+      "source": {
+        "cluster_id": 11,
+        "concept": "vent",
+        "n_views": 7,
+        "median_score": 0.921875,
+        "width_m": 0.6333333333333333,
+        "length_m": 0.7666666666666667,
+        "mean_mask_diameter_cm": 55.15093615341614
+      }
+    },
+    {
+      "id": 139,
+      "class": "diffuser",
+      "index": 12,
+      "centroid_px": [
+        1073.169231414795,
+        2075.853843688965
+      ],
+      "length_px": 60.253883361816406,
+      "width_px": 49.20295333862305,
+      "angle_deg": 127.87498474121094,
+      "source": {
+        "cluster_id": 12,
+        "concept": "vent",
+        "n_views": 6,
+        "median_score": 0.595703125,
+        "width_m": 0.3280196889241536,
+        "length_m": 0.4016925557454427,
+        "mean_mask_diameter_cm": 23.047609662963296
+      }
+    },
+    {
+      "id": 140,
+      "class": "diffuser",
+      "index": 13,
+      "centroid_px": [
+        954.8765182495117,
+        1918.920696258545
+      ],
+      "length_px": 120.84303283691406,
+      "width_px": 107.55702209472656,
+      "angle_deg": 1.1017061471939087,
+      "source": {
+        "cluster_id": 13,
+        "concept": "vent",
+        "n_views": 15,
+        "median_score": 0.93359375,
+        "width_m": 0.7170468139648437,
+        "length_m": 0.8056202189127604,
+        "mean_mask_diameter_cm": 54.28131706337614
+      }
+    },
+    {
+      "id": 141,
+      "class": "diffuser",
+      "index": 14,
+      "centroid_px": [
+        1084.4360809326172,
+        2302.406181335449
+      ],
+      "length_px": 117.56043243408203,
+      "width_px": 115.42626953125,
+      "angle_deg": 92.6025619506836,
+      "source": {
+        "cluster_id": 14,
+        "concept": "vent",
+        "n_views": 19,
+        "median_score": 0.9296875,
+        "width_m": 0.7695084635416667,
+        "length_m": 0.7837362162272136,
+        "mean_mask_diameter_cm": 62.327698686934
+      }
+    },
+    {
+      "id": 142,
+      "class": "diffuser",
+      "index": 15,
+      "centroid_px": [
+        708.5144805908203,
+        2295.819465637207
+      ],
+      "length_px": 115.08033752441406,
+      "width_px": 114.6549072265625,
+      "angle_deg": 1.2188752889633179,
+      "source": {
+        "cluster_id": 15,
+        "concept": "vent",
+        "n_views": 17,
+        "median_score": 0.921875,
+        "width_m": 0.7643660481770833,
+        "length_m": 0.7672022501627604,
+        "mean_mask_diameter_cm": 49.46163702736281
+      }
+    },
+    {
+      "id": 143,
+      "class": "diffuser",
+      "index": 16,
+      "centroid_px": [
+        997.1881217956543,
+        2384.618812561035
+      ],
+      "length_px": 26.6669979095459,
+      "width_px": 22.985363006591797,
+      "angle_deg": 95.71059322357178,
+      "source": {
+        "cluster_id": 16,
+        "concept": "vent",
+        "n_views": 4,
+        "median_score": 0.619140625,
+        "width_m": 0.15323575337727866,
+        "length_m": 0.17777998606363932,
+        "mean_mask_diameter_cm": 10.229110167243027
+      }
+    },
+    {
+      "id": 144,
+      "class": "diffuser",
+      "index": 17,
+      "centroid_px": [
+        987.4769401550293,
+        2962.4108085632324
+      ],
+      "length_px": 101.22073364257812,
+      "width_px": 98.05718994140625,
+      "angle_deg": 1.4502164125442505,
+      "source": {
+        "cluster_id": 17,
+        "concept": "vent",
+        "n_views": 7,
+        "median_score": 0.8984375,
+        "width_m": 0.653714599609375,
+        "length_m": 0.6748048909505209,
+        "mean_mask_diameter_cm": 43.85834772573002
+      }
+    },
+    {
+      "id": 145,
+      "class": "diffuser",
+      "index": 18,
+      "centroid_px": [
+        993.2273864746094,
+        3306.6331176757812
+      ],
+      "length_px": 94.97515869140625,
+      "width_px": 79.30657958984375,
+      "angle_deg": 92.04540824890137,
+      "source": {
+        "cluster_id": 18,
+        "concept": "vent",
+        "n_views": 3,
+        "median_score": 0.875,
+        "width_m": 0.5287105305989583,
+        "length_m": 0.633167724609375,
+        "mean_mask_diameter_cm": 47.94407776547423
+      }
+    },
+    {
+      "id": 146,
+      "class": "diffuser",
+      "index": 19,
+      "centroid_px": [
+        984.8046455383301,
+        3306.3372764587402
+      ],
+      "length_px": 97.38883209228516,
+      "width_px": 95.64667510986328,
+      "angle_deg": 91.63657712936401,
+      "source": {
+        "cluster_id": 19,
+        "concept": "vent",
+        "n_views": 4,
+        "median_score": 0.923828125,
+        "width_m": 0.6376445007324218,
+        "length_m": 0.6492588806152344,
+        "mean_mask_diameter_cm": 57.39507405348084
+      }
+    },
+    {
+      "id": 147,
+      "class": "diffuser",
+      "index": 20,
+      "centroid_px": [
+        654.0,
+        3294.5
+      ],
+      "length_px": 98.0,
+      "width_px": 97.0,
+      "angle_deg": 0.0,
+      "source": {
+        "cluster_id": 20,
+        "concept": "vent",
+        "n_views": 4,
+        "median_score": 0.93359375,
+        "width_m": 0.6466666666666666,
+        "length_m": 0.6533333333333333,
+        "mean_mask_diameter_cm": 45.44998489340025
+      }
+    },
+    {
+      "id": 148,
+      "class": "diffuser",
+      "index": 21,
+      "centroid_px": [
+        551.1442947387695,
+        2844.6714820861816
+      ],
+      "length_px": 180.43313598632812,
+      "width_px": 89.61689758300781,
+      "angle_deg": 1.9091522693634033,
+      "source": {
+        "cluster_id": 21,
+        "concept": "vent",
+        "n_views": 6,
+        "median_score": 0.931640625,
+        "width_m": 0.5974459838867188,
+        "length_m": 1.2028875732421875,
+        "mean_mask_diameter_cm": 63.08733758402769
+      }
+    },
+    {
+      "id": 149,
+      "class": "diffuser",
+      "index": 22,
+      "centroid_px": [
+        1033.7352867126465,
+        2016.558822631836
+      ],
+      "length_px": 32.36592483520508,
+      "width_px": 18.56055450439453,
+      "angle_deg": 175.60128784179688,
+      "source": {
+        "cluster_id": 22,
+        "concept": "vent",
+        "n_views": 3,
+        "median_score": 0.59375,
+        "width_m": 0.12373703002929687,
+        "length_m": 0.21577283223470053,
+        "mean_mask_diameter_cm": 9.918156287514778
+      }
+    }
+  ]
+}

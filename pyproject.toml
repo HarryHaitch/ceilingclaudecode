@@ -37,4 +37,8 @@ ceiling-rcp-init = "ceiling_rcp.init_session:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-ceiling_rcp = ["static/*.html", "static/*.js", "static/*.css", "py.typed"]
+ceiling_rcp = [
+    "static/*.html", "static/*.js", "static/*.css",
+    "preload_assets/*.json",
+    "py.typed",
+]

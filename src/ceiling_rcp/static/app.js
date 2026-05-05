@@ -1,4 +1,4 @@
-console.log("[ceiling-rcp] app.js build 12 — units, scan settings, vertex UX");
+console.log("[ceiling-rcp] app.js build 13 — services overlay (symbols)");
 
 // ─── UNITS ────────────────────────────────────────────────────────────────
 // World coords stay in metres throughout. These helpers turn metres into
@@ -462,6 +462,18 @@ const state = {
   // pink/black checker overlay returned by /face_below as
   // {key, threshold, bm, bbox}. Cleared on mouseup.
   belowOverlay: null,
+  // Ceiling-services symbols overlay. ``doc`` is the loaded symbols.json
+  // (canonical schema; see sam3_symbols.py). ``visible`` toggles the
+  // whole overlay on/off via the right-sidebar Print button. ``hidden``
+  // is a Set of class keys the user has individually unticked in the
+  // legend. ``selectedId`` is the symbol whose info card is showing.
+  symbols: {
+    doc: null,
+    visible: false,
+    hidden: new Set(),
+    selectedId: null,
+    status: "absent",
+  },
 };
 
 // ─── DOM ──────────────────────────────────────────────────────────────────
@@ -556,6 +568,17 @@ document.getElementById("btn-add-register-row").onclick = () => {
   appendRegisterRow({ rev: "", date: "", by: "", note: "" });
   pushDrawingRegister();
 };
+
+// Right-sidebar tab toggle (Regions / Services). The Services pane is
+// blank until a session loads — symbols are fetched lazily by
+// loadSymbolsForSession() once a plan is in.
+document.querySelectorAll(".right-tab[data-rtab]").forEach(b => {
+  b.onclick = () => setRightTab(b.dataset.rtab);
+});
+document.getElementById("btn-print-symbols").onclick = () => {
+  setSymbolsVisible(!state.symbols.visible);
+};
+document.getElementById("btn-generate-symbols").onclick = generateSymbols;
 
 window.addEventListener("resize", resizeCanvas);
 window.addEventListener("keydown", onKey);
@@ -664,6 +687,7 @@ async function runProcess() {
   document.getElementById("btn-export").disabled = false;
   fitView();
   refreshPolygonsList();
+  await loadSymbolsForSession();
   draw();
 }
 
@@ -1768,6 +1792,13 @@ function draw() {
   for (const iface of state.plan.interfaces || []) {
     drawInterface(iface);
   }
+  // Ceiling-services symbols overlay (Diffusers, Downlights, …). Drawn
+  // above interfaces so the symbols sit on top of the linework, but
+  // below the live drafting feedback (draft polygon / snap indicator)
+  // so the user's in-progress edit always wins visually.
+  if (state.symbols.visible && state.symbols.doc) {
+    drawSymbolsOverlay();
+  }
   // Hover preview for insert-vertex
   if (state.tool === "insert-vertex" && state.selection && state.hover.world) {
     drawInsertPreview();
@@ -2057,6 +2088,20 @@ function onMouseDown(e) {
     state.draft.push([w.x, w.z]);
     draw();
     return;
+  }
+
+  // Symbol overlay click — when the symbols layer is visible and the
+  // click landed on a symbol, show its info card and don't fall through
+  // to the polygon hit-test. Click on empty canvas (anywhere not on a
+  // symbol) clears the symbol selection.
+  if (state.symbols.visible && state.tool === "select") {
+    const sid = hitTestSymbol(m.x, m.y);
+    if (sid != null) {
+      selectSymbol(sid);
+      return;
+    }
+    // Fall through — let the polygon hit-test run so the user can still
+    // pick regions / vertices through gaps in the symbols.
   }
 
   // Insert-vertex mode: click an edge to inject a vertex.
@@ -2574,6 +2619,459 @@ async function exportPlan() {
   a.click();
 }
 
+// ─── CEILING-SERVICES SYMBOLS ─────────────────────────────────────────────
+// The Services tab loads an optional symbols.json from the server (or a
+// preloaded example for the canned demo session) and renders the symbols
+// on top of the ortho. Click toggles "print" mode; per-class checkboxes
+// in the legend hide individual classes; clicking a symbol shows its
+// label index, length, width, and centroid in the info card.
+
+function setRightTab(name) {
+  document.querySelectorAll(".right-tab[data-rtab]").forEach(b => {
+    b.classList.toggle("active", b.dataset.rtab === name);
+  });
+  document.querySelectorAll(".right-tab-pane").forEach(p => {
+    p.hidden = p.dataset.rpane !== name;
+  });
+}
+
+function setServicesStatus(text, cls = "") {
+  const el = document.getElementById("services-status");
+  if (!el) return;
+  el.textContent = text;
+  el.className = "muted";
+  if (cls) el.classList.add(cls);
+}
+
+function symbolClasses() {
+  return state.symbols.doc?.symbol_classes || {};
+}
+function symbolList() {
+  return state.symbols.doc?.symbols || [];
+}
+function pxPerCmFromSymbols() {
+  // Fall back to the plan grid if the symbols doc is missing one
+  // (shouldn't happen — empty_doc still emits a grid).
+  const ppm = state.symbols.doc?.grid?.pixels_per_metre
+    ?? state.plan?.grid?.pixels_per_metre
+    ?? 100;
+  return ppm / 100.0;
+}
+
+async function loadSymbolsForSession() {
+  if (!state.sessionId) return;
+  try {
+    const r = await fetch(`/api/sessions/${state.sessionId}/symbols`);
+    if (!r.ok) {
+      console.warn("symbols fetch failed:", r.status);
+      return;
+    }
+    const doc = await r.json();
+    state.symbols.doc = doc;
+    state.symbols.status = doc.status || (doc.symbols?.length ? "ok" : "absent");
+    // Reset transient state — preserve nothing from a prior session.
+    state.symbols.hidden.clear();
+    state.symbols.selectedId = null;
+  } catch (e) {
+    console.warn("symbols fetch threw:", e);
+    state.symbols.doc = null;
+    state.symbols.status = "absent";
+  }
+  refreshSymbolsUI();
+}
+
+function refreshSymbolsUI() {
+  const doc = state.symbols.doc;
+  const printBtn = document.getElementById("btn-print-symbols");
+  const symbols = symbolList();
+  const haveAny = symbols.length > 0;
+  printBtn.disabled = !haveAny;
+  printBtn.setAttribute("aria-pressed", state.symbols.visible ? "true" : "false");
+  printBtn.textContent = state.symbols.visible
+    ? "Hide symbols on plan"
+    : "Print symbols on plan";
+
+  if (state.symbols.status === "absent" || !haveAny) {
+    setServicesStatus(
+      "No symbols generated for this session yet. Use Detect symbols (SAM 3) "
+      + "to run the segmentation pipeline.", ""
+    );
+  } else if (state.symbols.status === "stale_grid") {
+    setServicesStatus(
+      "Symbols exist but were generated against a different ortho grid — "
+      + "regenerate after the latest scan re-render.", "warn"
+    );
+  } else {
+    setServicesStatus(`${symbols.length} symbols loaded.`, "ok");
+  }
+  refreshSymbolsLegend();
+  refreshSymbolInfo();
+}
+
+function refreshSymbolsLegend() {
+  const ul = document.getElementById("symbols-legend");
+  if (!ul) return;
+  ul.innerHTML = "";
+  ul.classList.remove("muted");
+  const classes = symbolClasses();
+  const symbols = symbolList();
+  if (Object.keys(classes).length === 0 || symbols.length === 0) {
+    ul.classList.add("muted");
+    ul.innerHTML = '<li>No symbols loaded yet.</li>';
+    return;
+  }
+  // Counts include only classes actually present, but legend rows always
+  // include every defined class so the user can re-enable an empty class
+  // after generating a fresh batch.
+  const counts = {};
+  for (const s of symbols) counts[s.class] = (counts[s.class] || 0) + 1;
+  for (const [key, def] of Object.entries(classes)) {
+    const n = counts[key] || 0;
+    const li = document.createElement("li");
+    li.className = "legend-row" + (state.symbols.hidden.has(key) ? " hidden-cls" : "");
+    li.innerHTML =
+      `<input type="checkbox" ${state.symbols.hidden.has(key) ? "" : "checked"}>` +
+      `<span class="legend-swatch" style="background:${def.color_hex}"></span>` +
+      `<span class="legend-label">${def.label}</span>` +
+      `<span class="legend-count">${n}</span>`;
+    const cb = li.querySelector("input");
+    cb.onclick = (e) => e.stopPropagation();
+    cb.onchange = () => {
+      if (cb.checked) state.symbols.hidden.delete(key);
+      else state.symbols.hidden.add(key);
+      // Hide the info card if the user just hid the class containing
+      // the selected symbol.
+      const sel = findSymbolById(state.symbols.selectedId);
+      if (sel && state.symbols.hidden.has(sel.class)) {
+        state.symbols.selectedId = null;
+        refreshSymbolInfo();
+      }
+      li.classList.toggle("hidden-cls", state.symbols.hidden.has(key));
+      draw();
+    };
+    ul.appendChild(li);
+  }
+}
+
+function findSymbolById(id) {
+  if (id == null) return null;
+  return symbolList().find(s => s.id === id) || null;
+}
+
+function setSymbolsVisible(on) {
+  state.symbols.visible = !!on;
+  if (!on) state.symbols.selectedId = null;
+  // If the user toggles symbols on, switch the right-tab to Services so
+  // the legend / info card is in view.
+  if (on) setRightTab("services");
+  refreshSymbolsUI();
+  draw();
+}
+
+function selectSymbol(id) {
+  state.symbols.selectedId = id;
+  setRightTab("services");
+  refreshSymbolInfo();
+  draw();
+}
+
+function refreshSymbolInfo() {
+  const el = document.getElementById("symbol-info");
+  if (!el) return;
+  const s = findSymbolById(state.symbols.selectedId);
+  if (!s) {
+    el.classList.remove("has-selection");
+    el.classList.add("muted");
+    el.textContent = "Click a symbol on the plan to see its details.";
+    return;
+  }
+  const def = (symbolClasses()[s.class]) || {};
+  const cm = pxPerCmFromSymbols();
+  // For circle-shaped symbols (Downlight, Sprinkler) the model carries
+  // a fixed diameter rather than length × width; show the diameter row
+  // so the info card stays accurate. Everything else falls back to the
+  // measured length/width in cm.
+  const isCircle = def.shape === "circle" || def.shape === "dot_in_circle";
+  const fixedD = def.fixed_diameter_cm;
+  const lenCm = s.length_px / cm;
+  const widCm = s.width_px / cm;
+  const cx = s.centroid_px[0];
+  const cy = s.centroid_px[1];
+  // Centroid in metres too — handier for users tagging fixtures
+  // against the room outline (which they think of in metres).
+  const grid = state.symbols.doc?.grid || state.plan?.grid;
+  let mx = null, mz = null;
+  if (grid) {
+    mx = grid.max_x - cx / grid.pixels_per_metre;
+    mz = grid.max_z - cy / grid.pixels_per_metre;
+  }
+  const sourceConcept = s.source?.concept;
+  const nViews = s.source?.n_views;
+  const score = s.source?.median_score;
+  const sizeRow = isCircle && fixedD
+    ? `<div class="sym-row"><span class="k">Diameter</span><span class="v">${fixedD.toFixed(1)} cm</span></div>`
+    : `<div class="sym-row"><span class="k">Length</span><span class="v">${lenCm.toFixed(1)} cm</span></div>`
+      + `<div class="sym-row"><span class="k">Width</span><span class="v">${widCm.toFixed(1)} cm</span></div>`;
+  const centroidWorld = (mx != null)
+    ? `<div class="sym-row"><span class="k">Centroid (m)</span>`
+      + `<span class="v">${mx.toFixed(2)}, ${mz.toFixed(2)}</span></div>`
+    : "";
+  const provenance = (sourceConcept || nViews != null)
+    ? `<div class="sym-row"><span class="k">Source</span>`
+      + `<span class="v">${sourceConcept || "—"}`
+      + (nViews != null ? `, ${nViews} views` : "")
+      + (typeof score === "number" ? ` · score ${score.toFixed(2)}` : "")
+      + `</span></div>`
+    : "";
+  el.classList.remove("muted");
+  el.classList.add("has-selection");
+  el.innerHTML =
+    `<div class="sym-head">`
+      + `<span class="legend-swatch" style="background:${def.color_hex || '#888'}"></span>`
+      + `<span>${def.label || s.class} ${s.index}</span>`
+    + `</div>`
+    + `<div class="sym-row"><span class="k">ID</span><span class="v">${s.id}</span></div>`
+    + `<div class="sym-row"><span class="k">Index</span><span class="v">${s.index}</span></div>`
+    + sizeRow
+    + `<div class="sym-row"><span class="k">Angle</span><span class="v">${(s.angle_deg ?? 0).toFixed(1)}°</span></div>`
+    + `<div class="sym-row"><span class="k">Centroid (px)</span>`
+      + `<span class="v">${cx.toFixed(0)}, ${cy.toFixed(0)}</span></div>`
+    + centroidWorld
+    + provenance;
+}
+
+// ─── Symbol rendering ────────────────────────────────────────────────────
+//
+// Drafting convention: every symbol body is **black-line + white-fill**.
+// The white fill cuts a hole through the ceiling masks underneath so the
+// fixture reads even on a busy plan, and a uniform black stroke means
+// the plan looks like a published RCP rather than a colour-coded debug
+// view. Class identity is carried by the *label* colour and the legend
+// swatch — the geometric markers themselves don't need to compete.
+
+const SYMBOL_STROKE = "#111111";
+const SYMBOL_FILL   = "#ffffff";
+const SYMBOL_LINE_PX = 1.4;   // canvas-px stroke width (un-scaled)
+
+function _drawCircle(cu, cv, rPx, { fill = SYMBOL_FILL, stroke = SYMBOL_STROKE,
+                                     lineWidth = SYMBOL_LINE_PX } = {}) {
+  ctx.beginPath();
+  ctx.arc(cu, cv, rPx, 0, Math.PI * 2);
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) {
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = lineWidth / state.view.scale;
+    ctx.stroke();
+  }
+}
+
+function _drawFilledDot(cu, cv, rPx, color = SYMBOL_STROKE) {
+  ctx.beginPath();
+  ctx.arc(cu, cv, rPx, 0, Math.PI * 2);
+  ctx.fillStyle = color; ctx.fill();
+}
+
+function _drawRotatedRect(cu, cv, lengthPx, widthPx, angleDeg,
+                          { fill = SYMBOL_FILL, stroke = SYMBOL_STROKE,
+                            lineWidth = SYMBOL_LINE_PX } = {}) {
+  const rad = angleDeg * Math.PI / 180;
+  ctx.save();
+  ctx.translate(cu, cv);
+  ctx.rotate(rad);
+  ctx.beginPath();
+  ctx.rect(-lengthPx / 2, -widthPx / 2, lengthPx, widthPx);
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) {
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = lineWidth / state.view.scale;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function _drawCrossInRect(cu, cv, lengthPx, widthPx, angleDeg,
+                          { stroke = SYMBOL_STROKE,
+                            lineWidth = SYMBOL_LINE_PX } = {}) {
+  const rad = angleDeg * Math.PI / 180;
+  ctx.save();
+  ctx.translate(cu, cv);
+  ctx.rotate(rad);
+  ctx.beginPath();
+  ctx.moveTo(-lengthPx / 2, -widthPx / 2);
+  ctx.lineTo(lengthPx / 2, widthPx / 2);
+  ctx.moveTo(lengthPx / 2, -widthPx / 2);
+  ctx.lineTo(-lengthPx / 2, widthPx / 2);
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = lineWidth / state.view.scale;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function _symbolPxSize(sym, def, pxPerCm) {
+  // Returns the [length_px, width_px] to draw this symbol at, falling
+  // back to the class's default_size_cm when the per-symbol fields are
+  // missing/zero. Mirrors sam3_symbols.render_symbols Python helper.
+  const minPx = 8;
+  const lengthPx = Math.max(minPx,
+    sym.length_px || (def.default_size_cm?.[0] || 30) * pxPerCm);
+  const widthPx  = Math.max(minPx,
+    sym.width_px  || (def.default_size_cm?.[1] || 30) * pxPerCm);
+  return [lengthPx, widthPx];
+}
+
+function drawSymbolsOverlay() {
+  const doc = state.symbols.doc;
+  if (!doc || !doc.symbols) return;
+  const classes = doc.symbol_classes || {};
+  const pxPerCm = pxPerCmFromSymbols();
+  const labelPx = 12;       // CSS px for label text
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  for (const s of doc.symbols) {
+    if (state.symbols.hidden.has(s.class)) continue;
+    const def = classes[s.class];
+    if (!def) continue;
+    // Class colour is reserved for the *label* and the legend swatch;
+    // the symbol body itself follows the black-line / white-fill
+    // drafting convention so it reads through the ceiling masks.
+    const labelColor = def.color_hex || "#fff";
+    const cu = s.centroid_px[0], cv = s.centroid_px[1];
+
+    if (def.shape === "circle") {
+      const dCm = def.fixed_diameter_cm || 20;
+      _drawCircle(cu, cv, dCm / 2 * pxPerCm);
+    } else if (def.shape === "dot_in_circle") {
+      const dOuter = def.fixed_diameter_cm || 12;
+      const dInner = def.fixed_inner_dot_diameter_cm || 5;
+      _drawCircle(cu, cv, dOuter / 2 * pxPerCm);
+      _drawFilledDot(cu, cv, dInner / 2 * pxPerCm);
+    } else {
+      // rect / rect_with_cross / rect_with_M
+      const [lengthPx, widthPx] = _symbolPxSize(s, def, pxPerCm);
+      _drawRotatedRect(cu, cv, lengthPx, widthPx, s.angle_deg || 0);
+      if (def.shape === "rect_with_cross") {
+        _drawCrossInRect(cu, cv, lengthPx, widthPx, s.angle_deg || 0);
+      } else if (def.shape === "rect_with_M") {
+        // Font size scales with the rect (image-pixel space), capped at
+        // 50 % of the shorter side so it sits inside the box. Earlier
+        // versions divided by state.view.scale, which decoupled the
+        // font size from the rect and made the M dwarf the body when
+        // zoomed out.
+        const fontPx = Math.min(lengthPx, widthPx) * 0.5;
+        ctx.save();
+        ctx.fillStyle = SYMBOL_STROKE;
+        ctx.font = `bold ${fontPx}px sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("M", cu, cv);
+        ctx.restore();
+      }
+    }
+
+    // Selection ring on top so it's visible no matter the shape.
+    if (state.symbols.selectedId === s.id) {
+      ctx.save();
+      const r = 18 / state.view.scale + Math.max(20, ((s.length_px || 30) + (s.width_px || 30)) * 0.25);
+      ctx.beginPath();
+      ctx.arc(cu, cv, r, 0, Math.PI * 2);
+      ctx.strokeStyle = "#ffaa00";
+      ctx.lineWidth = 2.5 / state.view.scale;
+      ctx.setLineDash([6 / state.view.scale, 4 / state.view.scale]);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Label — class-coloured text with a white halo so it reads on the
+    // dark ortho and the coloured ceiling tints. Skip when zoomed far
+    // out so the labels don't cake into a wall of text.
+    if (state.view.scale > 0.25) {
+      const lab = `${def.label || s.class} ${s.index}`;
+      ctx.save();
+      ctx.font = `${labelPx / state.view.scale}px -apple-system, system-ui, sans-serif`;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+      ctx.lineWidth = 3 / state.view.scale;
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+      ctx.fillStyle = labelColor;
+      const labU = cu + 8;
+      const labV = cv - 8;
+      ctx.strokeText(lab, labU, labV);
+      ctx.fillText(lab, labU, labV);
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+
+function hitTestSymbol(cx, cy) {
+  // Hit test in canvas-pixel space — radius scales inversely with view
+  // zoom so symbols stay grabbable when zoomed out. Larger fixtures
+  // (LED panels, diffusers) take their bounding-circle radius; small
+  // ones use a min-grab radius so a single-pixel cursor still lands.
+  if (!state.symbols.doc) return null;
+  const classes = symbolClasses();
+  const pxPerCm = pxPerCmFromSymbols();
+  let best = null;
+  let bestD = Infinity;
+  const minGrabPx = 12;  // canvas-pixel minimum
+  for (const s of symbolList()) {
+    if (state.symbols.hidden.has(s.class)) continue;
+    const def = classes[s.class];
+    if (!def) continue;
+    const cu = s.centroid_px[0], cv = s.centroid_px[1];
+    // Pick a radius in image-pixel space, then convert to canvas px.
+    let rImg;
+    if (def.shape === "circle" || def.shape === "dot_in_circle") {
+      const d = def.fixed_diameter_cm || 20;
+      rImg = d / 2 * pxPerCm;
+    } else {
+      const [lp, wp] = _symbolPxSize(s, def, pxPerCm);
+      rImg = Math.max(lp, wp) / 2;
+    }
+    const ic = imgToCanvas(cu, cv);
+    const rCanvas = Math.max(minGrabPx, rImg * state.view.scale);
+    const d = Math.hypot(ic.cx - cx, ic.cy - cy);
+    if (d <= rCanvas && d < bestD) {
+      bestD = d;
+      best = s.id;
+    }
+  }
+  return best;
+}
+
+async function generateSymbols() {
+  if (!state.sessionId) return;
+  setServicesStatus("Running SAM 3 segmentation pipeline…", "");
+  try {
+    const r = await fetch(
+      `/api/sessions/${state.sessionId}/symbols/generate`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ backend: "local" }),
+      },
+    );
+    if (!r.ok) {
+      let msg;
+      try {
+        const body = await r.json();
+        msg = body.detail || body.error || `HTTP ${r.status}`;
+      } catch (_) {
+        msg = `HTTP ${r.status}`;
+      }
+      setServicesStatus(msg, r.status === 501 ? "warn" : "err");
+      return;
+    }
+    const data = await r.json();
+    setServicesStatus(`Generated ${data.n_symbols ?? "?"} symbols.`, "ok");
+    await loadSymbolsForSession();
+    setSymbolsVisible(true);
+  } catch (e) {
+    setServicesStatus("Generation failed: " + e.message, "err");
+  }
+}
+
 // ─── BOOT ─────────────────────────────────────────────────────────────────
 async function loadFromUrlParam() {
   const sid = new URLSearchParams(window.location.search).get("session");
@@ -2614,6 +3112,7 @@ async function loadFromUrlParam() {
     await loadCeilingImage();
     fitView();
     refreshPolygonsList();
+    await loadSymbolsForSession();
     draw();
   } catch (e) {
     document.getElementById("session-label").textContent =
