@@ -1296,6 +1296,33 @@ async def api_define_ceilings(session_id: str) -> dict:
         if len(deduped) >= 2 and deduped != list(old_pts):
             lines[ci] = LineString(deduped)
 
+    # Pairwise crossing-point insertion. unary_union *does* node lines
+    # at exact crossings, but float-drift between user clicks can leave
+    # two chords visually crossing while their actual coords miss by
+    # ~1e-9 m. Explicitly compute the intersection of every line pair
+    # and splice each crossing point as a vertex into both lines —
+    # turns "near-miss" crossings into exact ones.
+    from itertools import combinations
+    for i, j in combinations(range(len(lines)), 2):
+        if lines[i] is None or lines[j] is None:
+            continue
+        try:
+            inter = lines[i].intersection(lines[j])
+        except Exception:
+            continue
+        if inter.is_empty:
+            continue
+        crossing_pts: list[tuple[float, float]] = []
+        if inter.geom_type == "Point":
+            crossing_pts.append((float(inter.x), float(inter.y)))
+        elif hasattr(inter, "geoms"):
+            for g in inter.geoms:
+                if g.geom_type == "Point":
+                    crossing_pts.append((float(g.x), float(g.y)))
+        for px, py in crossing_pts:
+            lines[i] = _insert_vertex(lines[i], Point(px, py), NODE_TOL_M)
+            lines[j] = _insert_vertex(lines[j], Point(px, py), NODE_TOL_M)
+
     merged = unary_union(lines)
     # Final tolerance pass. shapely.ops.snap aligns close vertices to a
     # common position so any float-drift from the rebuild step doesn't
@@ -1305,7 +1332,14 @@ async def api_define_ceilings(session_id: str) -> dict:
         merged = unary_union(merged)
     except Exception:
         pass
-    polys = list(polygonize(merged))
+    # polygonize_full also returns dangling edges (lines that didn't
+    # close into a ring) — useful for diagnostics when the user reports
+    # "this chord didn't make a face".
+    from shapely.ops import polygonize_full
+    polys_geoms, dangles_geom, cuts_geom, invalid_geom = polygonize_full(merged)
+    polys = list(polys_geoms.geoms) if hasattr(polys_geoms, "geoms") else list(polys_geoms)
+    dangles = (list(dangles_geom.geoms) if hasattr(dangles_geom, "geoms")
+               else list(dangles_geom)) if not dangles_geom.is_empty else []
 
     # Keep only polygons of meaningful area whose representative point
     # falls inside the room (polygonize on degenerate linework can leak
@@ -1316,12 +1350,37 @@ async def api_define_ceilings(session_id: str) -> dict:
         p for p in polys
         if p.area >= min_face_area and room_poly.contains(p.representative_point())
     ]
+    diagnostic = {
+        "input_chord_count": len(chord_idx_in_lines),
+        "input_closed_count": sum(
+            1 for iface in raw_interfaces if iface.get("closed")
+            and len(iface.get("polyline") or []) >= 3
+        ),
+        "polygons_raw": len(polys),
+        "polygons_after_filter": len(filtered),
+        "dangling_segments": len(dangles),
+        "node_tolerance_m": NODE_TOL_M,
+    }
+    if dangles:
+        # Surface up to a handful of dangles so the user can see *which*
+        # parts of which chord didn't node — caps at 8 to keep the
+        # response from ballooning on pathological input.
+        diagnostic["dangling_samples"] = [
+            {
+                "start": [float(d.coords[0][0]), float(d.coords[0][1])],
+                "end": [float(d.coords[-1][0]), float(d.coords[-1][1])],
+                "length_m": float(d.length),
+            }
+            for d in dangles[:8]
+        ]
     if not filtered:
-        raise HTTPException(
-            409,
+        detail = (
             "no faces produced — chords must terminate on the room outline "
-            "or another interface, and rings must close back to their start",
+            "or another interface, and rings must close back to their start"
         )
+        if dangles:
+            detail += f" ({len(dangles)} dangling segment(s) detected)"
+        raise HTTPException(409, detail)
 
     filtered.sort(key=lambda p: p.area, reverse=True)
 
@@ -1355,8 +1414,13 @@ async def api_define_ceilings(session_id: str) -> dict:
     _save_plan(session_id, plan)
 
     # Hand off to the snap pipeline. It re-derives plan.main + plan.regions
-    # from the topology, runs height analysis, and saves.
-    return await api_snap(session_id)
+    # from the topology, runs height analysis, and saves. We attach the
+    # noding diagnostic to the plan dict so the frontend can surface it
+    # (browser console.log) when faces < expected — gives the user
+    # actionable info for "this chord didn't make a face".
+    snapped_plan = await api_snap(session_id)
+    snapped_plan["last_define_diagnostic"] = diagnostic
+    return snapped_plan
 
 
 @app.put("/api/sessions/{session_id}/main_face")

@@ -1095,10 +1095,28 @@ async function defineCeilings() {
     await refreshHeatmap("region:" + reg.id, reg);
   refreshPolygonsList();
   draw();
-  setBanner(
-    `Ceilings defined — ${1 + (state.plan.regions || []).length} face(s).`,
-  );
-  setTimeout(() => banner.classList.remove("show"), 2500);
+
+  // Diagnose the result. With N open chords (each cutting one face into
+  // two) and M closed-ring islands, we expect 1 + N + M faces in the
+  // common case. A shortfall means a chord didn't node — surface it
+  // via banner and a console log so the user can debug specific cases.
+  const diag = state.plan.last_define_diagnostic;
+  const facesNow = 1 + (state.plan.regions || []).length;
+  const expected = diag
+    ? 1 + diag.input_chord_count + diag.input_closed_count
+    : facesNow;
+  if (diag) console.log("define_ceilings diagnostic:", diag);
+  if (diag && (facesNow < expected || diag.dangling_segments > 0)) {
+    const missing = expected - facesNow;
+    setBanner(
+      `Ceilings defined — ${facesNow} face(s), but ${missing} chord(s) didn't `
+      + `cut (${diag.dangling_segments} dangling segment(s)). See console.`,
+      true,
+    );
+  } else {
+    setBanner(`Ceilings defined — ${facesNow} face(s).`);
+    setTimeout(() => banner.classList.remove("show"), 2500);
+  }
 }
 
 async function pushMainFace(selKey) {
