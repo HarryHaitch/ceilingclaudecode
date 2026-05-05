@@ -1760,6 +1760,21 @@ function draw() {
     drawDraft();
   }
 
+  // Snap indicator — green ring on the locked-onto target. drawDraft
+  // does this for the second-and-later vertices, but the user also
+  // needs feedback while placing the FIRST vertex (when state.draft is
+  // still empty and drawDraft is skipped). Otherwise the first click
+  // looks freehand even when the cursor is locked onto a wall.
+  if (state.mode.startsWith("draw_") && state.draft.length === 0
+      && state.hover.snapped && state.hover.world) {
+    const h = worldToImg(state.hover.world.x, state.hover.world.z);
+    ctx.beginPath();
+    ctx.arc(h.u, h.v, 8 / state.view.scale, 0, Math.PI * 2);
+    ctx.strokeStyle = "#7cff79";
+    ctx.lineWidth = 2 / state.view.scale;
+    ctx.stroke();
+  }
+
   // Hovered-vertex highlight (drawn on top of everything so it's always
   // visible). Communicates "Delete will hit *this* one".
   if (state.hover.vertex && !state.drag && !state.mode.startsWith("draw_")) {
