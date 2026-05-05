@@ -1,8 +1,12 @@
 # Status
 
-**Tagged build: `Good WIP 2 04052026` (2026-05-04).** Branch
-`claude/admiring-fermi-4b18e7-impl`, based on `good-wip-1-040526`.
+**Tagged build: `good-wip-3-05052026` (2026-05-05).** Branch
+`claude/admiring-fermi-4b18e7-impl`, based on `good-wip-2-04052026`.
 Read this first when picking the work back up.
+
+**Read-only filesystem snapshot:** `/Users/harishusic/Documents/Claude
+Code/Good WIP 3 05052026/` (chmod a-w, with `repo.bundle` for full git
+restore). Don't edit it; it's the rollback point.
 
 ## What's shipped (v0.2)
 
@@ -311,27 +315,211 @@ topology field too; user re-snaps.
   title block). Fine for typical revisions; long histories truncate
   visually.
 
+## What shipped this session (Good WIP 3 05052026)
+
+Iteration on top of `good-wip-2-04052026` driven by the user's
+nine-item feedback list. Work was clustered into four commits on
+`claude/admiring-fermi-4b18e7-impl`:
+
+| Commit | Cluster | Headline |
+|---|---|---|
+| `bc554d6` | A | Editor UX polish + PDF title-block tweaks |
+| `83ba8c0` | B | Render PDF plan at a true architectural scale |
+| `7b0b601` | C | Per-region height histograms + draggable height pick |
+| `0e25a57` | D | Interface-tracing pipeline (replaces per-region tracing) |
+
+### Cluster A — UX polish
+
+- Project-info panel **defaults open**.
+- North-arrow picker: brighter needle (`--text` instead of `#222`),
+  red blob at the tip, `cursor: grab`, **drag** rather than click to
+  set heading, "Drag to set North" hint.
+- "Polygons" list renamed **"Regions"** and moved to a new 320 px
+  **right sidebar** alongside "Selected"; columns ride along.
+- PDF title-block strip narrowed 30 % (gridspec width ratio
+  `3.2:1.0` → `3.2:0.7`).
+- PDF field values bumped 10 pt → 14 pt (labels stay at 7 pt).
+- PDF ceiling labels render **horizontally** — dropped the
+  longest-edge rotation that read like a CAD section marker.
+- PDF ortho thumbnail now letterboxes inside a fixed box (was
+  stretched on tall rooms via `aspect="auto"`).
+
+### Cluster B — true-scale plan rendering
+
+- New `_choose_standard_scale(room_w, room_h, plan_w_in, plan_h_in,
+  units)` picks the largest of `(20, 50, 100, 200)` metric or
+  `(24, 48, 96, 192)` imperial that fits the room within the plan
+  area at 10 mm of paper margin per side.
+- `api_pdf` centres the room in a fixed paper-sized window:
+  `window_w_m = plan_w_in × 0.0254 × scale_ratio`. 1 m on the page
+  is exactly `1/scale_ratio` m on paper.
+- Scale display moves from a plan-axes inset to the title block as a
+  "SCALE  1:N" badge plus a graphic bar whose paper length equals the
+  marks' world distance ÷ scale. Marks tuned per ratio via
+  `SCALE_BAR_MARKS_METRIC` / `SCALE_BAR_MARKS_IMPERIAL` so the bar
+  reads cleanly across the ladder (e.g. 1:50 shows `0 1 2 5 m`,
+  1:200 shows `0 5 10 20 m`).
+- Padding tightened from 25 mm → 10 mm of paper per side; a 21 m
+  tall room on A1 now fits at 1:50 instead of being bumped to 1:100
+  for no visual gain.
+
+### Cluster C — height histograms + draggable height pick
+
+- New `_height_histogram(height_map, mask, bin_w_m=0.005)` returns
+  `{bin_edges_m, counts, min_y, max_y, bin_w_m}` for the valid
+  (non-NaN) ceiling heights inside the mask. Sourced from the existing
+  cone-band-filtered `height.npy` — no new triangle pass.
+- `_analyse_and_pack` now emits `histogram` alongside the existing
+  stats / heatmap fields.
+- New `selected_y` field on main / regions / topology faces
+  (absolute world Y, m). Defaults to `stats.mean_y`.
+  `relative_y = face.selected_y − main.selected_y` is derived
+  centrally by `_recompute_relatives(plan)` — called on every plan
+  load (via `_migrate_plan`) and before every save in handlers that
+  touch stats.
+- New endpoints
+  `PUT /api/sessions/{id}/main/selected_y` and
+  `PUT /api/sessions/{id}/region/{rid}/selected_y` (body
+  `{value: <metres>}`) plus `_mirror_selected_y_to_topology`.
+- Sidebar: each row gets a 264 × 40 px **SVG sparkline** — bars in
+  the face's tint, dashed grey line at `mean_y`, draggable red
+  marker + blob at `selected_y`, with absolute-height labels at
+  min / selected / max. Drag → live visual feedback → mouseup commits
+  via the new endpoint and refreshes every row's `relative_y` label.
+- "variance" → "spread" everywhere in the sidebar.
+- Schema bump 3 → 4. Old plans back-fill `selected_y = mean_y` on
+  first load; histograms repopulate on the next analyse pass
+  (re-snap or any region edit).
+
+### Cluster D — interface tracing replaces per-region tracing
+
+- New plan field `interfaces = [{id, polyline, closed}]`. Open
+  polylines are **chords** (subdivide whichever face contains them);
+  closed polylines are **island rings** (a face wholly inside
+  another).
+- New plan field `main_face_id` (default 0) — lets the user pick
+  the height datum without retracing.
+- New endpoints:
+  `POST /api/sessions/{id}/interface`,
+  `PUT /api/sessions/{id}/interface/{iid}`,
+  `DELETE /api/sessions/{id}/interface/{iid}`,
+  `POST /api/sessions/{id}/define_ceilings`,
+  `PUT /api/sessions/{id}/main_face`.
+- `define_ceilings` uses `shapely.ops.polygonize` on the union of
+  the room ring and every interface line. Filters out tiny
+  artefacts (< 0.05 m²) and outside-room slivers, sorts by area
+  descending, seeds the legacy `main` / `regions` views, and hands
+  off to the existing `api_snap` so the topology / heatmaps /
+  histograms build the same way they always did.
+- `main_face` swap rewrites `plan.main` ↔ a chosen region and
+  re-snaps so the topology stays canonical (face id 0 = main).
+- Workflow steps simplified: **Room → Trace interface → Add column
+  → Define ceilings → Export**. The old "Trace main ceiling" and
+  "Add ceiling region" steps and buttons are removed (endpoints
+  preserved server-side as a fallback).
+- Trace-interface tool: click vertices, click the first vertex (with
+  3+ points placed) to close as a ring, press Enter (with 2+ points)
+  to commit as a chord.
+- Interfaces render in cyan (`#00e5ff`) on the canvas above region
+  fills, with vertex dots. They appear as info rows in the Regions
+  panel for delete.
+- Each region row in the panel gains a **Main radio** — clicking it
+  on a non-main row swaps the datum. Currently-main row's radio is
+  disabled-checked.
+- Schema bump 4 → 5.
+
+### Schema progression this session
+
+- v3 → v4: face-level `selected_y` + `histogram` (cluster C).
+- v4 → v5: `interfaces` + `main_face_id` (cluster D).
+- Migrations are additive — old plans load with safe defaults and
+  keep working. New tracing flow only activates when the user starts
+  using `Trace interface`.
+
+### Files most touched
+
+| File | Cluster(s) |
+|---|---|
+| `src/ceiling_rcp/server.py` | A, B, C, D |
+| `src/ceiling_rcp/static/app.js` | A, C, D |
+| `src/ceiling_rcp/static/index.html` | A, C, D |
+| `src/ceiling_rcp/static/style.css` | A, C, D |
+
+`mesh.py`, `topology.py`, `polylabel.py`, `units.py`, `raster.py`,
+`analyse.py` were *not* touched — their existing surfaces were
+sufficient. The same is true of the segmentation lab in `debug/`.
+
+### Verification
+
+- API round-trips for selected_y (cluster C) and define_ceilings →
+  main_face swap (cluster D) checked numerically against the
+  topology-snapped session `0beced53c9df`.
+- PDFs rendered for both metric (1:50) and imperial (1:48) at every
+  cluster boundary; rasterised to PNG via `sips` and inspected
+  visually.
+- All static assets served at the bumped cache versions
+  (`app.js?v=18`, `style.css?v=17`).
+
+### Known v3 limits
+
+- **No live snap-to-existing while tracing interfaces.** Chord
+  endpoints rely on the user clicking close enough to the room
+  outline; Shapely's `unary_union` tolerates small drift but
+  obvious misses won't cut. Phase-2 improvement: snap the cursor
+  to nearby room/interface vertices and edges with a Shift override.
+- **Interface vertices aren't draggable post-trace.** Delete +
+  re-trace is the only edit path. Easy follow-up.
+- **`api_set_main` and `api_add_region` endpoints still alive**
+  but unbuttoned — kept as a fallback / migration path.
+- **Wide histogram ranges** observed on the existing topology-snapped
+  session (e.g. region 0 spans 0.74–2.05 m). The histogram surfaces
+  a pre-existing data-quality issue with the cone-band filter
+  (`mesh.ceiling_face_mask`) letting through a few non-ceiling
+  pixels. Worth tightening or revisiting `max_ceiling_variance_m`
+  on a per-session basis.
+- **Drawing register row count** still capped at 14 (carried from v2).
+- **Services legend** still a placeholder (carried from v2 — light
+  segmentation never started).
+
 ## Next session priorities
 
-The user-facing iteration list has been worked through. Open topics
-for the next session:
+### 1. Live snap while tracing interfaces
 
-### Light segmentation + symbol placement
+The biggest cluster-D follow-up. Right now chords only cut faces
+when the endpoints land *exactly* on existing linework, and the
+user has to eyeball it. Snapping the cursor to the nearest
+room-outline vertex / midpoint / interface vertex while drawing —
+with Shift to override — would make the new tracing flow feel
+production-ready. Mirror the existing draw-time `constrainShiftSnap`
+pattern but with geometry hits instead of axis locks.
 
-Carried forward from WIP 1 (priority 2). Bright-spot CC +
-shape-classify into strip / panel / downlight, drop CAD symbols
-into the PDF, populate the empty "Services" legend cell. SAM3.1-
-as-negative-space and a small fine-tuned classifier remain on the
-roadmap.
+Also useful: extend chord endpoints to the nearest line in
+`define_ceilings` server-side (Shapely `nearest_points` + a small
+extension), so a chord that *misses* the room outline by a few mm
+still cuts cleanly.
 
-### Smaller follow-ups likely to come up
+### 2. Interface vertex drag (post-trace)
 
-- Edge-drag tool for shared boundaries (translate the edge, slide
-  its endpoints along their other incident edges).
-- Numbered column references C1/C2/… in the legend if a real project
-  needs them.
-- Cleaner "Cmd+Z undo" — currently the in-browser polygon edits are
-  pushed straight to the server.
+Same architecture as the existing topology vertex drag — pick a
+vertex, drag, push back to `PUT /interface/{iid}` with the new
+polyline, optionally re-`define_ceilings` if a topology already
+exists.
+
+### 3. Light segmentation + symbol placement
+
+Carried forward from WIP 1. Bright-spot CC + shape-classify into
+strip / panel / downlight, drop CAD symbols into the PDF, populate
+the empty "Services" legend cell.
+
+### 4. Smaller follow-ups
+
+- Edge-drag tool for shared topology boundaries.
+- Tighten `mesh.ceiling_face_mask` so histograms don't include
+  obvious non-ceiling pixels — visible in cluster C as wide
+  per-region ranges on a known clean scan.
+- Numbered column references (C1 / C2 / …) in the legend if a real
+  project needs them.
+- Cleaner Cmd+Z undo — current edits are server-pushed immediately.
 - Drag-sensitivity tuning on tiny vertices when zoomed out.
 
 ## Quick-resume CLI
