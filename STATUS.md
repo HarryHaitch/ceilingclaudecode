@@ -483,44 +483,82 @@ sufficient. The same is true of the segmentation lab in `debug/`.
 
 ## Next session priorities
 
-### 1. Live snap while tracing interfaces
+User-confirmed punch list, grouped into five proposed clusters.
+Cluster E (bugs) is top-priority; the rest is feature work and the
+order can be reshuffled. Full detail (motivation, file pointers,
+acceptance criteria) lives in [`NEXT_SESSION.md`](NEXT_SESSION.md).
 
-The biggest cluster-D follow-up. Right now chords only cut faces
-when the endpoints land *exactly* on existing linework, and the
-user has to eyeball it. Snapping the cursor to the nearest
-room-outline vertex / midpoint / interface vertex while drawing —
-with Shift to override — would make the new tracing flow feel
-production-ready. Mirror the existing draw-time `constrainShiftSnap`
-pattern but with geometry hits instead of axis locks.
+### Cluster E — bug fixes
 
-Also useful: extend chord endpoints to the nearest line in
-`define_ceilings` server-side (Shapely `nearest_points` + a small
-extension), so a chord that *misses* the room outline by a few mm
-still cuts cleanly.
+1. **Main-ceiling swap doesn't stick.** Clicking the Main radio on
+   a non-main row reverts after the API round-trip.
+2. **PDF legend swatches are too vibrant** vs the 0.45-alpha plan
+   fills they label — match the muted colour.
 
-### 2. Interface vertex drag (post-trace)
+### Cluster F — interface-tracing finish-up (cluster D follow-ups)
 
-Same architecture as the existing topology vertex drag — pick a
-vertex, drag, push back to `PUT /interface/{iid}` with the new
-polyline, optionally re-`define_ceilings` if a topology already
-exists.
+3. Live snap-to-existing while tracing (cursor → nearest
+   room-outline / interface vertex / midpoint, Shift override).
+4. Server-side endpoint extension in `define_ceilings` so chords
+   that miss by a few mm still cut.
+5. Define ceilings missing chords — closes out once #3 / #4 ship.
+6. Interface vertex drag post-trace (same shape as the topology
+   vertex drag).
+7. Interface chords disappear / fade after a successful Define
+   (kept in the panel for delete).
 
-### 3. Light segmentation + symbol placement
+### Cluster G — histogram + region-row UX
 
-Carried forward from WIP 1. Bright-spot CC + shape-classify into
-strip / panel / downlight, drop CAD symbols into the PDF, populate
-the empty "Services" legend cell.
+8. Notes input above the histogram.
+9. Histogram 2× height.
+10. Slider readout in relative mm (0 for main, ± for regions).
+11. Histogram axis `−max(spread)` → `+max(spread)` with 0 marked,
+    not absolute metres — eliminates the empty-tail problem.
+12. Show peak % frequency as a number.
+13. Show % of ceiling above / below the current slider position.
+14. **Crop preview** — when the slider moves, render any pixels
+    in the polygon below the slider in a bright pink/black
+    checker overlay so the user sees what they're excluding.
+15. Per-row label `Height: XX mm` / `Spread: XX mm`, vertically
+    aligned.
 
-### 4. Smaller follow-ups
+### Cluster H — scan settings rename + outlier trim
 
+16. Rename "Max ceiling height variance" → **"Minimum ceiling
+    height"**, default 2.0 m, imperial-aware. Same plumbing,
+    friendlier framing.
+17. **New 2 %-trim outlier filter** on per-face stats + histogram —
+    don't tighten the existing cone-band filter; trim the top
+    2 % / bottom 2 % of valid pixel heights when computing
+    `mean_y` / `std_y` / `min_y` / `max_y` and the histogram.
+    Keeps `valid_frac` / `n_valid_px` / `n_total_px` honest. Drop
+    into `_analyse_and_pack` as a single `_trim_outliers` helper.
+
+### Cluster I — page size + scale selectors
+
+18. **Page-size selector** in Project info — default A1; metric
+    group A4–A0, imperial group US sheet sizes (default Arch D
+    when imperial). Stored on `plan.project.page_size`.
+19. **Scale selector** alongside, default to the current
+    `_choose_standard_scale` auto-pick, manual override allowed,
+    metric / imperial groups.
+20. **Sheet size in the PDF's scale box** (e.g. `A1 (841 × 594 mm)`
+    or `Arch D (24" × 36")`).
+
+The page-size change cascades into `api_pdf` — A1 is hardcoded
+today (`A1_W_IN, A1_H_IN = 33.11, 23.39`). Pull from a small
+`PAGE_SIZES` table keyed on the selected size.
+
+## Backlog (parked)
+
+Items from previous "Next session priorities" the user hasn't
+asked for this round — kept here so they don't get lost:
+
+- Light segmentation + symbol placement (Services legend
+  placeholder still empty).
 - Edge-drag tool for shared topology boundaries.
-- Tighten `mesh.ceiling_face_mask` so histograms don't include
-  obvious non-ceiling pixels — visible in cluster C as wide
-  per-region ranges on a known clean scan.
-- Numbered column references (C1 / C2 / …) in the legend if a real
-  project needs them.
-- Cleaner Cmd+Z undo — current edits are server-pushed immediately.
-- Drag-sensitivity tuning on tiny vertices when zoomed out.
+- Numbered column references (C1 / C2 / …) in the legend.
+- Cleaner Cmd+Z undo.
 
 ## Quick-resume CLI
 
