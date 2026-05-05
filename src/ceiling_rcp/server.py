@@ -127,6 +127,8 @@ def _migrate_plan(plan: dict[str, Any]) -> dict[str, Any]:
         "name": "", "address": "", "client": "", "company": "",
         "drawing_number": "", "north_deg": 0.0, "print_north": True,
         "drawing_register": [],
+        "page_size": "A1",       # I18 — default sheet size
+        "scale_override": None,  # I19 — None means use auto-pick
     }
     for k, v_default in defaults.items():
         proj.setdefault(k, v_default)
@@ -245,6 +247,54 @@ def _extract_upload(
 DEFAULT_MIN_CEILING_HEIGHT_M = 2.0
 
 
+# ─── PAGE SIZES ────────────────────────────────────────────────────────────────
+# Sheet sizes the user can target for the PDF. All values express the
+# *landscape* orientation — width is always the longer side.
+PAGE_SIZES: dict[str, dict[str, Any]] = {
+    "A4":      {"label": "A4",      "w_mm": 297.0,  "h_mm": 210.0,  "group": "metric"},
+    "A3":      {"label": "A3",      "w_mm": 420.0,  "h_mm": 297.0,  "group": "metric"},
+    "A2":      {"label": "A2",      "w_mm": 594.0,  "h_mm": 420.0,  "group": "metric"},
+    "A1":      {"label": "A1",      "w_mm": 841.0,  "h_mm": 594.0,  "group": "metric"},
+    "A0":      {"label": "A0",      "w_mm": 1189.0, "h_mm": 841.0,  "group": "metric"},
+    "LETTER":  {"label": "Letter",  "w_in": 11.0,   "h_in": 8.5,    "group": "imperial"},
+    "TABLOID": {"label": "Tabloid", "w_in": 17.0,   "h_in": 11.0,   "group": "imperial"},
+    "ARCH_B":  {"label": "Arch B",  "w_in": 18.0,   "h_in": 12.0,   "group": "imperial"},
+    "ARCH_C":  {"label": "Arch C",  "w_in": 24.0,   "h_in": 18.0,   "group": "imperial"},
+    "ARCH_D":  {"label": "Arch D",  "w_in": 36.0,   "h_in": 24.0,   "group": "imperial"},
+    "ARCH_E":  {"label": "Arch E",  "w_in": 48.0,   "h_in": 36.0,   "group": "imperial"},
+}
+
+DEFAULT_PAGE_SIZE_METRIC = "A1"
+DEFAULT_PAGE_SIZE_IMPERIAL = "ARCH_D"  # 36" × 24" — the closest US sheet to A1
+
+
+def _page_size_inches(code: str) -> tuple[float, float]:
+    """Return (width_in, height_in) for ``code``. Falls back to A1 if
+    the code isn't recognised so a stale plan.json never blocks export."""
+    spec = PAGE_SIZES.get(code) or PAGE_SIZES["A1"]
+    if "w_in" in spec:
+        return float(spec["w_in"]), float(spec["h_in"])
+    return float(spec["w_mm"]) / 25.4, float(spec["h_mm"]) / 25.4
+
+
+def _page_size_label(code: str) -> str:
+    """Title-block sheet label, e.g. ``"A1 (841 × 594 mm)"`` or
+    ``"Arch D (36\" × 24\")"``."""
+    spec = PAGE_SIZES.get(code) or PAGE_SIZES["A1"]
+    if "w_in" in spec:
+        return f'{spec["label"]} ({spec["w_in"]:g}" × {spec["h_in"]:g}")'
+    return f'{spec["label"]} ({spec["w_mm"]:g} × {spec["h_mm"]:g} mm)'
+
+
+def _resolve_page_size(plan: dict, units: str) -> str:
+    """The user's selected page-size code, falling back to a sensible
+    default for the active units when no override is set."""
+    code = ((plan.get("project") or {}).get("page_size") or "").upper()
+    if code in PAGE_SIZES:
+        return code
+    return DEFAULT_PAGE_SIZE_IMPERIAL if units == "imperial" else DEFAULT_PAGE_SIZE_METRIC
+
+
 # ─── SCALE LADDERS ────────────────────────────────────────────────────────────
 # Standard architectural scales — ordered largest → smallest. The PDF picks
 # the largest (most detail) that still fits the room within the plan area.
@@ -306,6 +356,8 @@ def _default_project() -> dict[str, Any]:
         "north_deg": 0.0,           # rotation in degrees, CCW from +Z (page up)
         "print_north": True,        # if False, the arrow is omitted
         "drawing_register": [],     # list of {rev, date, by, note}
+        "page_size": "A1",          # one of PAGE_SIZES; "" / unknown → resolve by units
+        "scale_override": None,     # int ratio, e.g. 50 = 1:50; None → auto
     }
 
 
@@ -788,6 +840,25 @@ async def api_set_project(session_id: str, payload: dict = Body(...)) -> dict:
             }
             for row in register
         ]
+    if "page_size" in payload:
+        code = str(payload["page_size"]).upper()
+        if code and code not in PAGE_SIZES:
+            raise HTTPException(
+                400, f"page_size must be one of {sorted(PAGE_SIZES)} or '' for default",
+            )
+        proj["page_size"] = code
+    if "scale_override" in payload:
+        raw = payload["scale_override"]
+        if raw in (None, "", "auto"):
+            proj["scale_override"] = None
+        else:
+            try:
+                ratio = int(raw)
+            except (TypeError, ValueError):
+                raise HTTPException(400, "scale_override must be an integer ratio or null")
+            if ratio < 5 or ratio > 1000:
+                raise HTTPException(400, "scale_override must be between 5 and 1000")
+            proj["scale_override"] = ratio
     plan["project"] = proj
     _save_plan(session_id, plan)
     return {"ok": True, "project": proj}
@@ -2500,11 +2571,14 @@ async def api_pdf(session_id: str) -> Response:
     room_w_m = room_maxx - room_minx
     room_h_m = room_maxz - room_minz
 
-    # ─── A1 landscape page (841 × 594 mm = 33.11 × 23.39 in) ──
-    # gridspec: plan area (top-left) + title block (full-height right strip)
-    # + legend strip (bottom-left).
-    A1_W_IN, A1_H_IN = 33.11, 23.39
-    fig = plt.figure(figsize=(A1_W_IN, A1_H_IN))
+    # ─── Page size & scale ──────────────────────────────────────────
+    # Page comes from plan.project.page_size (default A1 metric / Arch D
+    # imperial). Scale comes from plan.project.scale_override if set,
+    # otherwise the largest standard ratio that fits the room within the
+    # plan area at PLAN_PAPER_PAD_M of paper margin per side.
+    page_code = _resolve_page_size(plan, units)
+    page_w_in, page_h_in = _page_size_inches(page_code)
+    fig = plt.figure(figsize=(page_w_in, page_h_in))
     gs = fig.add_gridspec(
         nrows=2, ncols=2,
         width_ratios=[3.2, 0.7],   # plan : title block (30 % narrower than v1)
@@ -2519,14 +2593,21 @@ async def api_pdf(session_id: str) -> Response:
     # Plan-area paper dimensions, derived from the gridspec slot rather
     # than the ax (the latter only resolves once the figure renders).
     plan_bbox = gs[0, 0].get_position(fig)
-    plan_w_in = plan_bbox.width * A1_W_IN
-    plan_h_in = plan_bbox.height * A1_H_IN
+    plan_w_in = plan_bbox.width * page_w_in
+    plan_h_in = plan_bbox.height * page_h_in
 
-    # Pick the largest standard scale that fits the room inside the plan
-    # area with PLAN_PAPER_PAD_M of paper margin per side.
-    scale_ratio = _choose_standard_scale(
+    # Auto-pick the largest standard scale that fits, then honour any
+    # user override. The override may not actually fit; we still respect
+    # it (the user explicitly asked) so an oversized plan overflows
+    # rather than being silently downsized.
+    auto_scale = _choose_standard_scale(
         room_w_m, room_h_m, plan_w_in, plan_h_in, units,
     )
+    override = (plan.get("project") or {}).get("scale_override")
+    try:
+        scale_ratio = int(override) if override else auto_scale
+    except (TypeError, ValueError):
+        scale_ratio = auto_scale
 
     # Compute the world window that the plan area represents at this
     # scale: paper width × paper-mm-per-world-mm. Centre on the room.
@@ -2726,6 +2807,7 @@ async def api_pdf(session_id: str) -> Response:
         title_ax, project=project, session_id=session_id,
         ortho_path=_session_dir(session_id) / "out" / "ceiling.jpg",
         scale_ratio=scale_ratio, units=units,
+        page_size_label=_page_size_label(page_code),
     )
 
     # ─── Legends (bottom strip) ──
@@ -2773,10 +2855,11 @@ def _draw_north_arrow(ax, minx, maxx, minz, maxz, *, north_deg: float) -> None:
 
 
 def _draw_title_scale(title_ax, *, scale_ratio: int, units: str,
-                       y_top: float, y_bot: float, strip_w_in: float) -> None:
+                       y_top: float, y_bot: float, strip_w_in: float,
+                       page_size_label: str = "") -> None:
     """Draw the SCALE section inside the title strip: a label, the
-    "1:N" ratio, and a graphic scale bar whose paper length matches the
-    chosen scale exactly.
+    "1:N" ratio, the printed sheet size, and a graphic scale bar whose
+    paper length matches the chosen scale exactly.
 
     ``y_top`` / ``y_bot`` bound the section in title-axis y-units.
     ``strip_w_in`` is the title strip's paper width in inches — needed
@@ -2792,6 +2875,12 @@ def _draw_title_scale(title_ax, *, scale_ratio: int, units: str,
     title_ax.text(0.94, label_y, f"1:{scale_ratio}",
                    ha="right", va="top",
                    fontsize=14, color="#222")
+    # Sheet-size sub-line — tells the printer / drafter the intended
+    # output medium without having to count the figure dimensions.
+    if page_size_label:
+        title_ax.text(0.94, y_top - 0.045, page_size_label,
+                       ha="right", va="top",
+                       fontsize=7, color="#666")
 
     # Graphic bar: marks chosen per ratio so the paper length is
     # roughly half-strip-wide and the unit increments read cleanly.
@@ -2840,7 +2929,7 @@ def _draw_title_scale(title_ax, *, scale_ratio: int, units: str,
 
 def _draw_title_block(title_ax, *, project: dict, session_id: str,
                        ortho_path: Path, scale_ratio: int,
-                       units: str) -> None:
+                       units: str, page_size_label: str = "") -> None:
     """Right-side title block: ortho thumbnail, project metadata, scale
     badge + bar, and drawing register table."""
     from matplotlib.patches import Rectangle
@@ -2929,7 +3018,7 @@ def _draw_title_block(title_ax, *, project: dict, session_id: str,
     # Scale section (badge + graphic bar) — sits between the project
     # fields and the drawing register.
     scale_top = field_top - len(fields) * field_h - 0.02
-    scale_bot = scale_top - 0.06
+    scale_bot = scale_top - 0.075   # taller box: scale ratio + sheet line + bar
     title_ax.add_patch(Rectangle(
         (0.04, scale_bot), 0.92, scale_top - scale_bot,
         fill=False, edgecolor="#bbb", linewidth=0.5,
@@ -2937,6 +3026,7 @@ def _draw_title_block(title_ax, *, project: dict, session_id: str,
     _draw_title_scale(
         title_ax, scale_ratio=scale_ratio, units=units,
         y_top=scale_top, y_bot=scale_bot, strip_w_in=strip_w_in,
+        page_size_label=page_size_label,
     )
 
     # Drawing register table.

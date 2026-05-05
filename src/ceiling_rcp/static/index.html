@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>ceiling-rcp</title>
-  <link rel="stylesheet" href="style.css?v=19">
+  <link rel="stylesheet" href="style.css?v=20">
 </head>
 <body>
   <header>
@@ -49,6 +49,44 @@
             <label>Client<input type="text" data-project="client"></label>
             <label>Company<input type="text" data-project="company"></label>
             <label>Drawing number<input type="text" data-project="drawing_number"></label>
+            <div class="page-row">
+              <label>Page size
+                <select id="input-page-size" data-project="page_size">
+                  <optgroup label="Metric (ISO A)">
+                    <option value="A4">A4</option>
+                    <option value="A3">A3</option>
+                    <option value="A2">A2</option>
+                    <option value="A1" selected>A1</option>
+                    <option value="A0">A0</option>
+                  </optgroup>
+                  <optgroup label="Imperial (US)">
+                    <option value="LETTER">Letter (11&times;8.5&Prime;)</option>
+                    <option value="TABLOID">Tabloid (17&times;11&Prime;)</option>
+                    <option value="ARCH_B">Arch B (18&times;12&Prime;)</option>
+                    <option value="ARCH_C">Arch C (24&times;18&Prime;)</option>
+                    <option value="ARCH_D">Arch D (36&times;24&Prime;)</option>
+                    <option value="ARCH_E">Arch E (48&times;36&Prime;)</option>
+                  </optgroup>
+                </select>
+              </label>
+              <label>Scale
+                <select id="input-scale" data-project="scale_override">
+                  <option value="">Auto (largest that fits)</option>
+                  <optgroup label="Metric">
+                    <option value="20">1:20</option>
+                    <option value="50">1:50</option>
+                    <option value="100">1:100</option>
+                    <option value="200">1:200</option>
+                  </optgroup>
+                  <optgroup label="Imperial">
+                    <option value="24">1:24 (½&Prime; = 1ʹ)</option>
+                    <option value="48">1:48 (¼&Prime; = 1ʹ)</option>
+                    <option value="96">1:96 (⅛&Prime; = 1ʹ)</option>
+                    <option value="192">1:192 (1/16&Prime; = 1ʹ)</option>
+                  </optgroup>
+                </select>
+              </label>
+            </div>
             <div class="north-row">
               <div>
                 <label class="muted" style="display:block;font-size:11px">North direction</label>

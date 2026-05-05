@@ -136,6 +136,14 @@ ol.workflow li.done { border-color: var(--ok); }
 .project-fields .checkbox { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
 .project-fields .checkbox input { margin: 0; }
 .project-fields .north-row { display: flex; gap: 12px; align-items: stretch; }
+.project-fields .page-row { display: flex; gap: 8px; }
+.project-fields .page-row label { flex: 1; }
+.project-fields select {
+  width: 100%; padding: 4px 6px; margin-top: 2px;
+  background: #14171a; color: var(--text);
+  border: 1px solid #2c3036; border-radius: 3px;
+  font-size: 12px;
+}
 .register { width: 100%; border-collapse: collapse; font-size: 11px; }
 .register th, .register td {
   padding: 2px 4px; border: 1px solid var(--line); text-align: left;
