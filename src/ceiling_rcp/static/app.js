@@ -251,11 +251,13 @@ function dragRingFor(dragInfo) {
     const target = topo.vertices[dragInfo.topologyVid];
     if (!target) return null;
     const sel = state.selection?.key;
+    const mainId = state.plan?.main_face_id ?? 0;
     let face = null;
-    if (sel === "main") face = topo.faces?.find(f => f.id === 0);
+    if (sel === "main") face = topo.faces?.find(f => f.id === mainId);
     else if (sel?.startsWith("region:")) {
       const rid = parseInt(sel.slice(7), 10);
-      face = topo.faces?.find(f => f.region_id === rid || f.id === rid + 1);
+      face = topo.faces?.find(f => f.region_id === rid
+        || (f.id !== mainId && f.id === rid + 1));
     }
     if (!face) {
       // Fallback: any face whose ring contains this world point.
@@ -288,6 +290,7 @@ function rederiveFacePolygons() {
   // shares it.
   const topo = state.plan?.topology;
   if (!topo) return;
+  const mainId = state.plan?.main_face_id ?? 0;
   const edgesById = new Map(topo.edges.map(e => [e.id, e]));
   for (const face of topo.faces) {
     const pts = [];
@@ -301,9 +304,9 @@ function rederiveFacePolygons() {
       }
     }
     face.polygon = pts;
-    if (face.id === 0 && state.plan.main) {
+    if (face.id === mainId && state.plan.main) {
       state.plan.main.polygon = pts;
-    } else if (face.id !== 0) {
+    } else if (face.id !== mainId) {
       const rid = face.region_id;
       const r = (state.plan.regions || []).find(r => r.id === rid);
       if (r) r.polygon = pts;
@@ -977,6 +980,8 @@ async function pushMainFace(selKey) {
     await refreshHeatmap("region:" + reg.id, reg);
   refreshPolygonsList();
   draw();
+  setBanner("Datum swapped — heights now relative to the selected face.");
+  setTimeout(() => banner.classList.remove("show"), 2200);
 }
 
 function setBanner(text, isErr = false) {
@@ -2063,12 +2068,13 @@ async function pushTintForKey(key, tint) {
   if (topo) {
     // Find the face id corresponding to the legacy key.
     let faceId = null;
+    const mainId = state.plan?.main_face_id ?? 0;
     if (key === "main") {
-      faceId = 0;
+      faceId = mainId;
     } else if (key.startsWith("region:")) {
       const rid = parseInt(key.slice(7), 10);
       const f = (topo.faces || []).find(
-        f => f.region_id === rid || (f.kind !== "main" && f.id === rid + 1));
+        f => f.region_id === rid || (f.id !== mainId && f.id === rid + 1));
       if (f) faceId = f.id;
     }
     if (faceId == null) return;

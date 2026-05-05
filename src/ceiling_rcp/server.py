@@ -608,6 +608,30 @@ def _region_tint(region_id: int) -> str:
     return REGION_PALETTE[region_id % len(REGION_PALETTE)]
 
 
+# Alpha applied to every face fill in the PDF plan area. The legend
+# swatches blend to white at the same alpha so the swatch reads as
+# the same colour the eye sees on the plan.
+PLAN_FILL_ALPHA = 0.45
+
+
+def _muted_fill(hex_color: str, alpha: float = PLAN_FILL_ALPHA) -> tuple[float, float, float]:
+    """Pre-blend ``hex_color`` with a white background at ``alpha`` so the
+    resulting RGB triple is what an alpha=alpha fill would look like over
+    white. Used for legend swatches so they match the muted plan fills
+    without relying on alpha rendering through PDF backends."""
+    h = (hex_color or "#ffffff").lstrip("#")
+    if len(h) != 6:
+        return (1.0, 1.0, 1.0)
+    r = int(h[0:2], 16) / 255.0
+    g = int(h[2:4], 16) / 255.0
+    b = int(h[4:6], 16) / 255.0
+    return (
+        r * alpha + (1 - alpha),
+        g * alpha + (1 - alpha),
+        b * alpha + (1 - alpha),
+    )
+
+
 # ─── APP ──────────────────────────────────────────────────────────────────────
 
 app = FastAPI(title="ceiling-rcp", version="0.2.0")
@@ -1060,9 +1084,18 @@ async def api_swap_main_face(session_id: str, payload: dict = Body(...)) -> dict
     """Pick which face is the ceiling-height datum.
 
     Body: ``{"key": "main"}`` (no-op) or ``{"key": "region:<id>"}``.
-    The named face becomes the new main; the previous main becomes a
-    region keeping the freed region id. If the session is snapped, the
-    topology is rebuilt so face id 0 is the new main."""
+
+    Post-snap, the topology already tiles the room cleanly and we just
+    need to relabel which face plays the "main" role. We do that by
+    flipping ``kind`` / ``region_id`` / ``label`` / ``tint`` on the two
+    affected faces and updating ``plan.main_face_id`` to point at the new
+    main. The vertices, edges and rings — i.e. the actual face shapes —
+    don't move.
+
+    Re-Voronoi'ing here was wrong: the new main's polygon is nominally
+    inside an existing region's polygon (the previously-main face), so
+    stage-1 region claims would steal every pixel of the new main and
+    leave face 0 with zero coverage."""
     plan = _load_plan(session_id)
     key = str(payload.get("key", ""))
     if key == "main":
@@ -1074,6 +1107,49 @@ async def api_swap_main_face(session_id: str, payload: dict = Body(...)) -> dict
     except (ValueError, IndexError):
         raise HTTPException(400, f"bad region key {key!r}")
 
+    topo = plan.get("topology")
+    if topo is not None:
+        old_main_id = int(plan.get("main_face_id", 0))
+        old_main_face = next(
+            (f for f in topo["faces"] if int(f["id"]) == old_main_id),
+            None,
+        )
+        new_main_face = next(
+            (f for f in topo["faces"]
+             if int(f["id"]) != old_main_id
+             and int(f.get("region_id", -1)) == rid),
+            None,
+        )
+        if old_main_face is None:
+            raise HTTPException(409, "topology has no main face — re-snap")
+        if new_main_face is None:
+            raise HTTPException(404, f"unknown region {rid}")
+        if int(new_main_face["id"]) == old_main_id:
+            return {"ok": True, "noop": True, "plan": plan}
+
+        old_main_label = old_main_face.get("label", "Main Ceiling (1)")
+        old_main_face["kind"] = "region"
+        old_main_face["region_id"] = rid
+        old_main_face["label"] = (
+            old_main_label
+            if old_main_label != "Main Ceiling (1)"
+            else f"Ceiling Region ({rid + 2})"
+        )
+        old_main_face["tint"] = _region_tint(rid)
+
+        new_main_face["kind"] = "main"
+        new_main_face.pop("region_id", None)
+        new_main_face["label"] = "Main Ceiling (1)"
+        new_main_face["tint"] = MAIN_TINT
+
+        plan["main_face_id"] = int(new_main_face["id"])
+        # Re-render heatmaps + recompute stats with the new role tints,
+        # and refresh the legacy main / regions views.
+        _refresh_topology_polygons(plan, session_id)
+        _save_plan(session_id, plan)
+        return {"ok": True, "plan": _load_plan(session_id)}
+
+    # Pre-snap: simple polygon swap on the legacy views.
     target = next((r for r in plan.get("regions", []) if r["id"] == rid), None)
     if target is None:
         raise HTTPException(404, f"unknown region {rid}")
@@ -1081,8 +1157,6 @@ async def api_swap_main_face(session_id: str, payload: dict = Body(...)) -> dict
     if cur_main is None:
         raise HTTPException(409, "no main ceiling set yet")
 
-    # Swap the underlying polygons. Re-snap (if topology exists) will
-    # rebuild every derived view from the new main-vs-region split.
     target_poly = [list(p) for p in target["polygon"]]
     target_notes = target.get("notes", "")
     old_main_poly = [list(p) for p in cur_main["polygon"]]
@@ -1105,13 +1179,7 @@ async def api_swap_main_face(session_id: str, payload: dict = Body(...)) -> dict
         "notes": old_main_notes,
     })
     plan["regions"].sort(key=lambda r: r["id"])
-    plan["main_face_id"] = 0  # always 0 after re-snap
-
-    if plan.get("topology"):
-        plan["topology"] = None
-        plan["snapped"] = False
-        _save_plan(session_id, plan)
-        return await api_snap(session_id)
+    plan["main_face_id"] = 0
 
     _recompute_relatives(plan)
     _save_plan(session_id, plan)
@@ -1835,6 +1903,7 @@ async def api_snap(session_id: str) -> dict:
         session_id, main_coords, holes=main_holes, tint=main_tint,
     )
     main_face.update({
+        "kind": "main",
         "label": main_meta["label"],
         "notes": main_meta["notes"],
         "tint": main_tint,
@@ -1867,6 +1936,7 @@ async def api_snap(session_id: str) -> dict:
         m = analysis["stats"]["mean_y"]
         relative_y = (m - datum) if (m is not None and datum is not None) else None
         face.update({
+            "kind": "region",
             "region_id": rid,
             "label": meta["label"],
             "notes": meta["notes"],
@@ -1887,6 +1957,7 @@ async def api_snap(session_id: str) -> dict:
 
     plan["topology"] = topo
     plan["regions"] = new_regions
+    plan["main_face_id"] = 0  # fresh snap: face id 0 is always the main
     plan["snapped"] = True
     _recompute_relatives(plan)
     _save_plan(session_id, plan)
@@ -1924,15 +1995,20 @@ def _resolve_face_holes(face: dict, edges: list[dict], vertices: list[list[float
 def _refresh_topology_polygons(plan: dict, session_id: str) -> None:
     """After mutating ``plan['topology']['vertices']`` (or any face's ring),
     rebuild every face's ``polygon``, re-run the height analysis on it, and
-    sync the derived ``main`` / ``regions`` views the frontend reads."""
+    sync the derived ``main`` / ``regions`` views the frontend reads.
+
+    Honours ``plan.main_face_id`` so a post-snap main-face swap (which
+    relabels roles in place rather than re-Voronoi'ing) renders with the
+    correct main / region split."""
     topo = plan["topology"]
     if topo is None:
         return
 
     vertices = topo["vertices"]
     edges = topo["edges"]
+    main_id = int(plan.get("main_face_id", 0))
 
-    main_face = next((f for f in topo["faces"] if f["id"] == 0), None)
+    main_face = next((f for f in topo["faces"] if f["id"] == main_id), None)
     datum = None
     if main_face is not None:
         coords = _resolve_face_polygon(main_face, edges, vertices)
@@ -1944,12 +2020,15 @@ def _refresh_topology_polygons(plan: dict, session_id: str) -> None:
         main_face["polygon"] = coords
         main_face["holes_polygons"] = holes
         main_face.update({
+            "kind": "main",
             "label": main_face.get("label", "Main Ceiling (1)"),
             "notes": main_face.get("notes", ""),
             "tint": tint,
             "relative_y": 0.0,
             **analysis,
         })
+        # Strip any region_id left over from a previous role.
+        main_face.pop("region_id", None)
         datum = analysis["stats"]["mean_y"]
         plan["main"] = {
             "polygon": coords,
@@ -1962,14 +2041,18 @@ def _refresh_topology_polygons(plan: dict, session_id: str) -> None:
 
     new_regions = []
     for face in topo["faces"]:
-        if face["id"] == 0:
+        if face["id"] == main_id:
             continue
         coords = _resolve_face_polygon(face, edges, vertices)
         if len(coords) < 3:
             # Face collapsed; drop it (topology stays but the region view skips).
             continue
         holes = _resolve_face_holes(face, edges, vertices)
-        rid = int(face.get("region_id", face["id"] - 1))
+        # region_id is the user-facing id and must persist across role swaps.
+        # Fall back to (face_id - 1) for legacy plans where region_id wasn't
+        # written; subtract an extra 1 if the face id is past the main slot.
+        fallback_rid = face["id"] - 1 if face["id"] > main_id else face["id"]
+        rid = int(face.get("region_id", fallback_rid))
         tint = face.get("tint", _region_tint(rid))
         analysis = _analyse_and_pack(session_id, coords, holes=holes, tint=tint)
         m = analysis["stats"]["mean_y"]
@@ -1977,6 +2060,8 @@ def _refresh_topology_polygons(plan: dict, session_id: str) -> None:
         face["polygon"] = coords
         face["holes_polygons"] = holes
         face.update({
+            "kind": "region",
+            "region_id": rid,
             "tint": tint,
             "relative_y": relative_y,
             **analysis,
@@ -2249,7 +2334,7 @@ async def api_pdf(session_id: str) -> Response:
     # patch (the legacy double-stroke behaviour, accepted for pre-snap
     # plans).
     use_topology = topo is not None and bool(topo.get("edges"))
-    fill_alpha = 0.45
+    fill_alpha = PLAN_FILL_ALPHA
 
     def _fill(poly_pts, *, face_color, edge_color, label, rel_text, notes,
               holes=None):
@@ -2728,7 +2813,8 @@ def _draw_legends(legend_ax, *, main: dict | None, regions: list,
         y = 0.86 - idx * row_h
         legend_ax.add_patch(Rectangle(
             (x + 0.01, y - 0.04), 0.025, 0.05,
-            facecolor=row["tint"], edgecolor="#222", linewidth=0.5,
+            facecolor=_muted_fill(row["tint"]),
+            edgecolor="#222", linewidth=0.5,
         ))
         legend_ax.text(x + 0.045, y, f"{row['label']}",
                        ha="left", va="top", fontsize=8, color="#222")
