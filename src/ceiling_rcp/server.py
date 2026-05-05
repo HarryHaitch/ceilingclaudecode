@@ -955,6 +955,13 @@ async def api_add_interface(session_id: str, payload: dict = Body(...)) -> dict:
 async def api_update_interface(
     session_id: str, interface_id: int, payload: dict = Body(...),
 ) -> dict:
+    """Update an interface's polyline / closed flag.
+
+    If a topology has already been derived (i.e. ``define_ceilings`` was
+    run), moving a vertex invalidates the polygonisation. Auto re-run
+    ``define_ceilings`` so the user's edit is reflected immediately —
+    same shape of auto-resnap that ``api_delete_region`` /
+    ``api_update_obstruction`` already implement."""
     plan = _load_plan(session_id)
     iface = next(
         (i for i in plan.get("interfaces", []) if i["id"] == interface_id),
@@ -971,7 +978,16 @@ async def api_update_interface(
         iface["closed"] = bool(payload["closed"])
     if iface.get("closed") and len(iface["polyline"]) < 3:
         raise HTTPException(400, "closed interface needs at least 3 vertices")
+    had_topology = plan.get("topology") is not None
     _save_plan(session_id, plan)
+    if had_topology:
+        # api_define_ceilings returns the full plan dict (via its own
+        # internal hand-off to api_snap). Wrap it in {plan: ...} so the
+        # frontend can branch on the redefined flag without sniffing the
+        # response shape.
+        new_plan = await api_define_ceilings(session_id)
+        return {"ok": True, "interface": iface, "redefined": True,
+                "plan": new_plan}
     return {"ok": True, "interface": iface}
 
 
@@ -997,32 +1013,86 @@ async def api_define_ceilings(session_id: str) -> dict:
     against the new polygons.
 
     The user picks which face is the ceiling datum afterwards via
-    ``PUT /main_face`` — the largest face is just a sensible default."""
-    from shapely.geometry import LineString, Polygon
-    from shapely.ops import unary_union, polygonize
+    ``PUT /main_face`` — the largest face is just a sensible default.
+
+    Belt-and-braces for the cursor-snap during tracing: every open
+    chord's two endpoints get extended onto the nearest point on the
+    union of all *other* lines (room outline + every other interface),
+    if that nearest point is within ``END_EXTENSION_TOL_M``. This
+    rescues chords whose endpoints land 1-5 mm shy of an existing line
+    — those wouldn't share a common vertex with anything in
+    ``unary_union``, so ``polygonize`` would silently leave the chord
+    dangling rather than cut a face out of the room."""
+    from shapely.geometry import LineString, Polygon, Point
+    from shapely.ops import unary_union, polygonize, nearest_points
 
     plan = _load_plan(session_id)
     room_pts = plan.get("room")
     if not room_pts or len(room_pts) < 3:
         raise HTTPException(400, "room outline required before defining ceilings")
 
-    # Build the linework: room ring (closed) + each interface (open chord
-    # or closed ring). Numerical drift between user clicks and the room
-    # outline is small but nonzero; unary_union on the merged geometry
-    # handles common-vertex matching automatically.
-    lines: list[LineString] = []
+    END_EXTENSION_TOL_M = 0.05  # 5 cm — generous on top of the 14 px live snap
+
+    raw_interfaces = list(plan.get("interfaces", []))
     room_ring = list(room_pts) + [room_pts[0]]
-    lines.append(LineString(room_ring))
-    for iface in plan.get("interfaces", []):
+    room_line = LineString(room_ring)
+
+    # Pre-build LineStrings for every interface (or None for those too
+    # short to use), so the per-chord "every other line" union is just a
+    # filter rather than re-parsing.
+    iface_lines: list[LineString | None] = []
+    for iface in raw_interfaces:
         pts = iface.get("polyline") or []
         if len(pts) < 2:
+            iface_lines.append(None)
             continue
         if iface.get("closed"):
             if len(pts) < 3:
+                iface_lines.append(None)
                 continue
-            lines.append(LineString(list(pts) + [pts[0]]))
+            iface_lines.append(LineString(list(pts) + [pts[0]]))
         else:
-            lines.append(LineString(pts))
+            iface_lines.append(LineString(pts))
+
+    # End-extend each open chord. Closed rings don't have endpoints to
+    # extend — they already close back to themselves.
+    snapped_endpoints: list[list[list[float]] | None] = []
+    for i, iface in enumerate(raw_interfaces):
+        if iface_lines[i] is None or iface.get("closed"):
+            snapped_endpoints.append(None)
+            continue
+        pts = list(iface.get("polyline") or [])
+        if len(pts) < 2:
+            snapped_endpoints.append(None)
+            continue
+        others = [room_line] + [
+            ln for j, ln in enumerate(iface_lines)
+            if j != i and ln is not None
+        ]
+        union = unary_union(others)
+        new_pts = [list(p) for p in pts]
+        for k in (0, -1):
+            ep = Point(new_pts[k])
+            try:
+                target, _ = nearest_points(union, ep)
+            except Exception:
+                continue
+            if ep.distance(target) <= END_EXTENSION_TOL_M:
+                new_pts[k] = [float(target.x), float(target.y)]
+        snapped_endpoints.append(new_pts)
+
+    # Build the final linework using the (possibly extended) chord pts.
+    lines: list[LineString] = [room_line]
+    for i, iface in enumerate(raw_interfaces):
+        if iface_lines[i] is None:
+            continue
+        if iface.get("closed"):
+            lines.append(iface_lines[i])
+            continue
+        pts = snapped_endpoints[i] or list(iface.get("polyline") or [])
+        if len(pts) < 2:
+            continue
+        lines.append(LineString(pts))
 
     merged = unary_union(lines)
     polys = list(polygonize(merged))

@@ -226,6 +226,72 @@ function constrainShiftSnap(x, z) {
   return snapAlongOrPerp(x, z, b, [b[0] - a[0], b[1] - a[1]]);
 }
 
+// Snap radius for "snap to nearest existing room/interface vertex or
+// midpoint", in canvas pixels. The standard close-loop check uses 12
+// px; 14 here gives a slightly more forgiving target for endpoints
+// without colliding with the close-loop bias on the first vertex.
+const SNAP_TO_EXISTING_PX = 14;
+
+function snapToNearestExisting(x, z) {
+  // Returns [sx, sz] of the nearest room-outline / interface vertex /
+  // midpoint within SNAP_TO_EXISTING_PX of canvas distance, else null.
+  // Caller skips this when Shift is held — Shift is the override that
+  // re-routes to the constrainShiftSnap ortho-lock path. The vertex of
+  // the in-progress draft is intentionally excluded so the close-loop
+  // first-vertex check still gets to act on its tighter 12 px bias.
+  if (!state.plan) return null;
+  const targets = [];
+  const room = state.plan.room || [];
+  const n = room.length;
+  for (let i = 0; i < n; i++) {
+    targets.push(room[i]);
+    const next = room[(i + 1) % n];
+    targets.push([(room[i][0] + next[0]) / 2, (room[i][1] + next[1]) / 2]);
+  }
+  for (const iface of state.plan.interfaces || []) {
+    const line = iface.polyline || [];
+    const m = line.length;
+    if (m < 2) continue;
+    for (let i = 0; i < m; i++) targets.push(line[i]);
+    const stop = iface.closed ? m : m - 1;
+    for (let i = 0; i < stop; i++) {
+      const a = line[i];
+      const b = line[(i + 1) % m];
+      targets.push([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
+    }
+  }
+  if (!targets.length) return null;
+  const cur = worldToImg(x, z);
+  let bestD = SNAP_TO_EXISTING_PX;
+  let bestPt = null;
+  for (const [tx, tz] of targets) {
+    const t = worldToImg(tx, tz);
+    const d = Math.hypot(t.u - cur.u, t.v - cur.v) * state.view.scale;
+    if (d < bestD) { bestD = d; bestPt = [tx, tz]; }
+  }
+  return bestPt;
+}
+
+function applyTraceSnap(world, shift) {
+  // Single entry point for the trace tool's cursor snap. Shift held
+  // → ortho-lock relative to the previous draft edge (existing
+  // behaviour). Otherwise → snap to nearest existing room / interface
+  // vertex / midpoint. Returns the snapped {x, z} (and updates
+  // state.hover.snapped so drawDraft can highlight the snap target).
+  state.hover.snapped = false;
+  if (shift) {
+    const c = constrainShiftSnap(world.x, world.z);
+    if (c) return { x: c[0], z: c[1] };
+    return world;
+  }
+  const c = snapToNearestExisting(world.x, world.z);
+  if (c) {
+    state.hover.snapped = true;
+    return { x: c[0], z: c[1] };
+  }
+  return world;
+}
+
 function constrainShiftSnapForDrag(x, z, dragInfo) {
   // Drag case. Snap the moving vertex relative to its ring neighbours in
   // the *selected* face (post-snap) or the polygon being dragged
@@ -354,7 +420,7 @@ const state = {
   selection: null,
   drag: null,
   panning: null,
-  hover: { world: null, vertex: null },
+  hover: { world: null, vertex: null, snapped: false },
   // Map of { kind: "room"|"main"|"region:N" → ImageBitmap } for heatmaps
   heatmaps: new Map(),
 };
@@ -596,7 +662,7 @@ function startDraw(kind) {
   state.draftClosed = false;
   banner.textContent = {
     room: "Drawing ROOM outline — click vertices, click first or press Enter to close. Esc = cancel",
-    interface: "Tracing INTERFACE — end on the room outline (chord) or click first vertex to close (ring). Shift = orthogonal lock.",
+    interface: "Tracing INTERFACE — cursor auto-snaps to nearby vertices. Click first vertex to close (ring) or end on room outline (chord). Shift = ortho lock (overrides snap).",
     column: "Drawing COLUMN — ceiling regions stop at its boundary. Hold Shift to lock 90°.",
   }[kind];
   banner.classList.add("show");
@@ -1633,6 +1699,15 @@ function drawInterface(iface) {
   if (pts.length < 2) return;
   const selKey = "interface:" + iface.id;
   const selected = state.selection?.key === selKey;
+  // Once a topology is in place, the chord is a face boundary that
+  // already gets stroked by the topology renderer. Drawing it again on
+  // top would just be noise. Fade unselected interfaces to a hint so
+  // the user knows the chord is still an editable object (delete from
+  // the Regions panel, drag a vertex to nudge then auto-redefine), but
+  // it's not visually competing with the actual face outlines.
+  const faded = !!state.plan?.topology && !selected;
+  ctx.save();
+  if (faded) ctx.globalAlpha = 0.35;
   ctx.beginPath();
   for (let i = 0; i < pts.length; i++) {
     const p = worldToImg(pts[i][0], pts[i][1]);
@@ -1643,22 +1718,28 @@ function drawInterface(iface) {
     ctx.lineTo(p0.u, p0.v);
   }
   ctx.strokeStyle = selected ? "#ffffff" : "#00e5ff";
-  ctx.lineWidth = (selected ? 2.4 : 1.8) / state.view.scale;
-  ctx.setLineDash([]);
+  ctx.lineWidth = (selected ? 2.4 : 1.4) / state.view.scale;
+  ctx.setLineDash(faded ? [4 / state.view.scale, 3 / state.view.scale] : []);
   ctx.stroke();
+  ctx.setLineDash([]);
 
-  // Vertex dots so the user can grab them post-trace.
-  const r = 4 / state.view.scale;
-  for (let i = 0; i < pts.length; i++) {
-    const v = worldToImg(pts[i][0], pts[i][1]);
-    ctx.beginPath();
-    ctx.arc(v.u, v.v, r, 0, Math.PI * 2);
-    ctx.fillStyle = "#00e5ff";
-    ctx.fill();
-    ctx.strokeStyle = "#003a4a";
-    ctx.lineWidth = 1 / state.view.scale;
-    ctx.stroke();
+  // Vertex dots so the user can grab them post-trace. Hide them when
+  // faded — the row in the Regions panel still surfaces the chord for
+  // delete, and clicking it re-selects to bring vertices back.
+  if (!faded) {
+    const r = 4 / state.view.scale;
+    for (let i = 0; i < pts.length; i++) {
+      const v = worldToImg(pts[i][0], pts[i][1]);
+      ctx.beginPath();
+      ctx.arc(v.u, v.v, r, 0, Math.PI * 2);
+      ctx.fillStyle = "#00e5ff";
+      ctx.fill();
+      ctx.strokeStyle = "#003a4a";
+      ctx.lineWidth = 1 / state.view.scale;
+      ctx.stroke();
+    }
   }
+  ctx.restore();
 }
 
 function drawDraft() {
@@ -1690,6 +1771,18 @@ function drawDraft() {
     ctx.lineWidth = 1.5 / state.view.scale;
     ctx.stroke();
   }
+
+  // Snap indicator: green ring around the cursor when it's locked onto
+  // an existing room / interface vertex or midpoint. Tells the user
+  // "the click will land exactly here, not where the cursor is."
+  if (state.hover.snapped && state.hover.world) {
+    const h = worldToImg(state.hover.world.x, state.hover.world.z);
+    ctx.beginPath();
+    ctx.arc(h.u, h.v, 8 / state.view.scale, 0, Math.PI * 2);
+    ctx.strokeStyle = "#7cff79";
+    ctx.lineWidth = 2 / state.view.scale;
+    ctx.stroke();
+  }
 }
 
 // ─── INPUT ────────────────────────────────────────────────────────────────
@@ -1714,10 +1807,7 @@ function onMouseDown(e) {
 
   if (drawing) {
     let w = canvasToWorld(m.x, m.y);
-    if (e.shiftKey) {
-      const c = constrainShiftSnap(w.x, w.z);
-      if (c) w = { x: c[0], z: c[1] };
-    }
+    w = applyTraceSnap(w, e.shiftKey);
     const isIface = state.mode === "draw_interface";
     // Click on first vertex to close (a ring, for interface; a polygon
     // for room/column). Min vertices: 3 for both.
@@ -1770,11 +1860,15 @@ function onMouseDown(e) {
     state.selection = { key: hit.key };
     if (state.tool === "select" && hit.vertexIndex != null) {
       state.drag = hit;
-      // Post-snap, this vertex is shared with every other face that owns
-      // the same junction. Resolve to a topology vertex so the drag moves
-      // them all in lockstep.
+      // Post-snap, a face vertex is shared with every other face at the
+      // same junction. Resolve to a topology vertex so the drag moves
+      // them all in lockstep. Interfaces are NOT part of the topology
+      // — they live on top of it as the linework that define_ceilings
+      // consumes — so dragging an interface vertex must stay scoped to
+      // that interface even if it coincides with a topology vertex.
+      const isInterface = hit.key.startsWith("interface:");
       const poly = polygonForKey(hit.key);
-      if (poly) {
+      if (poly && !isInterface) {
         const v = poly[hit.vertexIndex];
         const vid = topologyVertexAtWorld(v[0], v[1]);
         if (vid >= 0) state.drag.topologyVid = vid;
@@ -1820,13 +1914,15 @@ function onMouseMove(e) {
   const m = getMouse(e);
   state.hover.world = canvasToWorld(m.x, m.y);
 
-  // While drawing with shift held, snap the hover preview so the next
-  // edge will continue collinearly OR turn at exactly 90° — whichever
-  // direction the cursor is closer to. Drawn-vertex commit reads from
-  // hover.world too, so the click lands exactly on the preview line.
-  if (state.mode.startsWith("draw_") && e.shiftKey) {
-    const c = constrainShiftSnap(state.hover.world.x, state.hover.world.z);
-    if (c) state.hover.world = { x: c[0], z: c[1] };
+  // While drawing, snap the hover preview either to a nearby existing
+  // room / interface vertex or midpoint (default), or — when Shift is
+  // held — to a 0/90° lock relative to the previous draft edge. Commit
+  // (onMouseDown) reads from hover.world via the same applyTraceSnap
+  // path, so the click lands exactly on the preview marker.
+  if (state.mode.startsWith("draw_")) {
+    state.hover.world = applyTraceSnap(state.hover.world, e.shiftKey);
+  } else {
+    state.hover.snapped = false;
   }
 
   if (state.panning) {
@@ -1869,6 +1965,20 @@ function onMouseMove(e) {
 }
 
 function findHoveredVertex(cx, cy, thresholdPx) {
+  // Interfaces are NOT part of the topology graph — they're the
+  // tracing-time linework that `define_ceilings` consumes — so check
+  // them before the topology branch so a chord vertex on top of a
+  // topology junction can still be edited as the chord's vertex.
+  for (const iface of state.plan?.interfaces || []) {
+    const line = iface.polyline || [];
+    for (let i = 0; i < line.length; i++) {
+      const ic = imgToCanvas(...Object.values(worldToImg(line[i][0], line[i][1])));
+      const d = Math.hypot(ic.cx - cx, ic.cy - cy);
+      if (d < thresholdPx) {
+        return { key: "interface:" + iface.id, vertexIndex: i };
+      }
+    }
+  }
   // Post-snap: prefer topology vertices so a junction shared by N faces
   // resolves to the single shared id (consistent with the drag path).
   if (state.plan?.topology) {
@@ -1952,11 +2062,9 @@ function onKey(e) {
     deleteHoveredVertex();
   } else if (e.key === "Shift" && state.mode.startsWith("draw_") && state.hover.world) {
     // Re-snap the preview the instant shift is pressed/released, even
-    // if the mouse hasn't moved since.
-    const c = e.type === "keydown"
-      ? constrainShiftSnap(state.hover.world.x, state.hover.world.z)
-      : null;
-    if (c) state.hover.world = { x: c[0], z: c[1] };
+    // if the mouse hasn't moved since. Shift held → ortho lock; not
+    // held → fall back to snap-to-existing.
+    state.hover.world = applyTraceSnap(state.hover.world, e.type === "keydown");
     draw();
   }
 }
@@ -1969,10 +2077,17 @@ async function deleteHoveredVertex() {
     state.hover.vertex = null;
     return;
   }
-  // Pre-snap (or column) — splice the vertex out of the polygon and push.
+  // Pre-snap (or column / interface) — splice the vertex out and push.
   const poly = polygonForKey(h.key);
-  if (!poly || poly.length <= 3) {
-    setBanner("Polygon needs at least 3 vertices.", true);
+  if (!poly) return;
+  // Min vertex count: 2 for an open interface chord, 3 for everything
+  // else (closed polygons + closed interface rings).
+  const isOpenChord = h.key.startsWith("interface:")
+    && !((state.plan.interfaces || [])
+      .find(i => "interface:" + i.id === h.key)?.closed);
+  const minLen = isOpenChord ? 2 : 3;
+  if (poly.length <= minLen) {
+    setBanner(`Need at least ${minLen} vertices.`, true);
     return;
   }
   poly.splice(h.vertexIndex, 1);
@@ -1994,6 +2109,10 @@ function polygonForKey(key) {
     const id = parseInt(key.slice(7), 10);
     return (state.plan.obstructions || []).find(o => o.id === id)?.polygon;
   }
+  if (key.startsWith("interface:")) {
+    const id = parseInt(key.slice(10), 10);
+    return (state.plan.interfaces || []).find(i => i.id === id)?.polyline;
+  }
   return null;
 }
 
@@ -2010,6 +2129,12 @@ function hitTest(cx, cy) {
   // but the user must still be able to drag/select their vertices.
   for (const o of state.plan.obstructions || [])
     all.push({ key: "column:" + o.id, poly: o.polygon });
+  // Interfaces sit on top of the topology faces and stay editable after
+  // define_ceilings — moving a chord vertex re-runs polygonisation
+  // server-side. Push them last so a coincident region/main vertex still
+  // wins when the user is editing the underlying ceiling outlines.
+  for (const i of state.plan.interfaces || [])
+    all.push({ key: "interface:" + i.id, poly: i.polyline });
 
   const selKey = state.selection?.key;
   const ordered = selKey
@@ -2176,6 +2301,28 @@ async function pushPolygonForKey(key) {
       } else if (d.obstruction) {
         Object.assign(obs, d.obstruction);
       }
+    }
+  } else if (key.startsWith("interface:")) {
+    const id = parseInt(key.slice(10), 10);
+    const iface = (state.plan.interfaces || []).find(i => i.id === id);
+    if (!iface) return;
+    const r = await fetch(`/api/sessions/${state.sessionId}/interface/${id}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ polyline: iface.polyline }),
+    });
+    if (r.ok) {
+      const d = await r.json();
+      // If a topology already existed, the server re-ran define_ceilings
+      // and returned a fresh plan — adopt it wholesale so the topology +
+      // heatmaps reflect the moved interface.
+      if (d.redefined && d.plan) {
+        state.plan = d.plan;
+        await refreshAllHeatmaps();
+      } else if (d.interface) {
+        Object.assign(iface, d.interface);
+      }
+    } else {
+      setBanner("Interface update failed: " + (await r.text()).slice(0, 120), true);
     }
   }
   refreshPolygonsList();
