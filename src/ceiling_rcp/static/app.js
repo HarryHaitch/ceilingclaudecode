@@ -1922,7 +1922,7 @@ function drawInterface(iface) {
   // it's not visually competing with the actual face outlines.
   const faded = !!state.plan?.topology && !selected;
   ctx.save();
-  if (faded) ctx.globalAlpha = 0.35;
+  if (faded) ctx.globalAlpha = 0.7;
   ctx.beginPath();
   for (let i = 0; i < pts.length; i++) {
     const p = worldToImg(pts[i][0], pts[i][1]);
@@ -1933,8 +1933,8 @@ function drawInterface(iface) {
     ctx.lineTo(p0.u, p0.v);
   }
   ctx.strokeStyle = selected ? "#ffffff" : "#00e5ff";
-  ctx.lineWidth = (selected ? 2.4 : 1.4) / state.view.scale;
-  ctx.setLineDash(faded ? [4 / state.view.scale, 3 / state.view.scale] : []);
+  ctx.lineWidth = (selected ? 2.4 : 1.8) / state.view.scale;
+  ctx.setLineDash(faded ? [6 / state.view.scale, 4 / state.view.scale] : []);
   ctx.stroke();
   ctx.setLineDash([]);
 
