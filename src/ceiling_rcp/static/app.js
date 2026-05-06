@@ -145,7 +145,7 @@ function nearestTopologyEdge(x, z) {
 
 async function insertVertexOnTopologyEdge(edgeId, projWorld) {
   const r = await fetch(
-    `/api/sessions/${state.sessionId}/topology/edge/${edgeId}/insert_vertex`,
+    `/api/sessions/${encodeURIComponent(state.sessionId)}/topology/edge/${edgeId}/insert_vertex`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -164,7 +164,7 @@ async function insertVertexOnTopologyEdge(edgeId, projWorld) {
 
 async function deleteTopologyVertex(vid) {
   const r = await fetch(
-    `/api/sessions/${state.sessionId}/topology/vertex/${vid}`,
+    `/api/sessions/${encodeURIComponent(state.sessionId)}/topology/vertex/${vid}`,
     { method: "DELETE" },
   );
   if (!r.ok) {
@@ -179,7 +179,7 @@ async function deleteTopologyVertex(vid) {
 
 async function unsnapTopology() {
   if (!confirm("Un-snap clears the shared-edge topology. The current ceiling regions stay; you can edit them and re-snap. Continue?")) return;
-  const r = await fetch(`/api/sessions/${state.sessionId}/topology`, { method: "DELETE" });
+  const r = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/topology`, { method: "DELETE" });
   if (!r.ok) {
     setBanner("Un-snap failed: " + (await r.text()).slice(0, 120), true);
     return;
@@ -419,7 +419,7 @@ async function pushTopologyVertices() {
   const topo = state.plan?.topology;
   if (!topo) return;
   const r = await fetch(
-    `/api/sessions/${state.sessionId}/topology/vertices`,
+    `/api/sessions/${encodeURIComponent(state.sessionId)}/topology/vertices`,
     {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -677,7 +677,7 @@ async function uploadFiles(fileList) {
 async function runProcess() {
   const fd = new FormData();
   fd.append("ppm", "150");
-  const r = await fetch(`/api/sessions/${state.sessionId}/process`,
+  const r = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/process`,
     { method: "POST", body: fd });
   if (!r.ok) { setReport("Processing failed.", "err"); return; }
   state.plan = await r.json();
@@ -692,7 +692,7 @@ async function runProcess() {
 }
 
 async function loadCeilingImage() {
-  const r = await fetch(`/api/sessions/${state.sessionId}/image/ceiling.jpg?_=${Date.now()}`);
+  const r = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/image/ceiling.jpg?_=${Date.now()}`);
   state.imageBitmap = await createImageBitmap(await r.blob());
 }
 
@@ -764,7 +764,7 @@ async function commitDraft() {
   state.mode = "select";
 
   if (kind === "room") {
-    const r = await fetch(`/api/sessions/${state.sessionId}/room`, {
+    const r = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/room`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ polygon }),
     });
@@ -779,7 +779,7 @@ async function commitDraft() {
       document.getElementById("btn-define").disabled = false;
     }
   } else if (kind === "interface") {
-    const r = await fetch(`/api/sessions/${state.sessionId}/interface`, {
+    const r = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/interface`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ polyline: polygon, closed }),
     });
@@ -791,7 +791,7 @@ async function commitDraft() {
       setBanner("Add interface failed: " + (await r.text()).slice(0, 120), true);
     }
   } else if (kind === "column") {
-    const r = await fetch(`/api/sessions/${state.sessionId}/obstruction`, {
+    const r = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/obstruction`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ polygon, kind: "column" }),
     });
@@ -821,7 +821,7 @@ async function refreshHeatmap(key, polyObj) {
 
 async function deletePolygon(kind, regionId) {
   if (kind === "column") {
-    const r = await fetch(`/api/sessions/${state.sessionId}/obstruction/${regionId}`,
+    const r = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/obstruction/${regionId}`,
       { method: "DELETE" });
     if (r.ok) {
       const d = await r.json();
@@ -838,7 +838,7 @@ async function deletePolygon(kind, regionId) {
     return;
   }
   if (kind === "region") {
-    const r = await fetch(`/api/sessions/${state.sessionId}/region/${regionId}`,
+    const r = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/region/${regionId}`,
       { method: "DELETE" });
     if (r.ok) {
       const d = await r.json();
@@ -853,12 +853,12 @@ async function deletePolygon(kind, regionId) {
       }
     }
   } else if (kind === "interface") {
-    await fetch(`/api/sessions/${state.sessionId}/interface/${regionId}`,
+    await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/interface/${regionId}`,
       { method: "DELETE" });
     state.plan.interfaces = (state.plan.interfaces || [])
       .filter(i => i.id !== regionId);
   } else if (kind === "room") {
-    await fetch(`/api/sessions/${state.sessionId}/room`, {
+    await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/room`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ polygon: null }),
     });
@@ -872,7 +872,7 @@ async function deletePolygon(kind, regionId) {
   } else if (kind === "main") {
     // Legacy: delete main face. After cluster D the user re-derives by
     // clicking Define ceilings again.
-    await fetch(`/api/sessions/${state.sessionId}/main`, {
+    await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/main`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ polygon: null }),
     });
@@ -926,7 +926,7 @@ function scheduleProjectPush(key, value) {
 
 async function pushProject(patch) {
   if (!state.sessionId) return;
-  const r = await fetch(`/api/sessions/${state.sessionId}/project`, {
+  const r = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/project`, {
     method: "PUT", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   });
@@ -1005,7 +1005,7 @@ function syncProjectPanel(project) {
 async function setUnits(value) {
   if (!state.sessionId) return;
   if (state.plan?.units === value) return;
-  const r = await fetch(`/api/sessions/${state.sessionId}/units`, {
+  const r = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/units`, {
     method: "PUT", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ value }),
   });
@@ -1078,7 +1078,7 @@ async function applyMinCeilingHeight() {
     if (!ok) return;
   }
   setBanner("Re-rendering with new minimum ceiling height…");
-  const r = await fetch(`/api/sessions/${state.sessionId}/scan_settings`, {
+  const r = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/scan_settings`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ min_ceiling_height_m: v }),
@@ -1106,7 +1106,7 @@ async function defineCeilings() {
   if (!state.sessionId) return;
   if (!state.plan?.room) { setBanner("Trace the room outline first."); return; }
   setBanner("Polygonising room + interfaces…");
-  const r = await fetch(`/api/sessions/${state.sessionId}/define_ceilings`,
+  const r = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/define_ceilings`,
     { method: "POST" });
   if (!r.ok) {
     setBanner("Define ceilings failed: " + (await r.text()).slice(0, 200), true);
@@ -1145,7 +1145,7 @@ async function defineCeilings() {
 
 async function pushMainFace(selKey) {
   if (!state.sessionId) return;
-  const r = await fetch(`/api/sessions/${state.sessionId}/main_face`, {
+  const r = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/main_face`, {
     method: "PUT", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ key: selKey }),
   });
@@ -1178,7 +1178,7 @@ async function downloadPdf() {
   setBanner("Generating PDF…");
   let blob;
   try {
-    const r = await fetch(`/api/sessions/${state.sessionId}/pdf`);
+    const r = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/pdf`);
     if (!r.ok) {
       setBanner("PDF failed: " + (await r.text()).slice(0, 120), true);
       return;
@@ -1559,7 +1559,7 @@ function renderHistogramSparkline(face, selKey) {
   function requestOverlay(threshold) {
     if (overlayInflight) { overlayQueued = threshold; return; }
     overlayInflight = true;
-    const url = `/api/sessions/${state.sessionId}/face_below`
+    const url = `/api/sessions/${encodeURIComponent(state.sessionId)}/face_below`
       + `?key=${encodeURIComponent(selKey)}&y=${threshold}`;
     fetch(url).then(async (r) => {
       if (!r.ok) return;
@@ -1627,10 +1627,10 @@ async function pushSelectedY(selKey, newY) {
   if (!state.sessionId) return;
   let url;
   if (selKey === "main") {
-    url = `/api/sessions/${state.sessionId}/main/selected_y`;
+    url = `/api/sessions/${encodeURIComponent(state.sessionId)}/main/selected_y`;
   } else if (selKey.startsWith("region:")) {
     const id = parseInt(selKey.slice(7), 10);
-    url = `/api/sessions/${state.sessionId}/region/${id}/selected_y`;
+    url = `/api/sessions/${encodeURIComponent(state.sessionId)}/region/${id}/selected_y`;
   } else {
     return;
   }
@@ -1646,7 +1646,7 @@ async function pushSelectedY(selKey, newY) {
   // Server's recompute touched relative_y on every face — re-read the
   // whole plan so the UI's labels stay in sync (especially after a
   // main.selected_y drag, which changes every region's delta).
-  const planResp = await fetch(`/api/sessions/${state.sessionId}/plan`);
+  const planResp = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/plan`);
   if (!planResp.ok) return;
   state.plan = await planResp.json();
   refreshPolygonsList();
@@ -1657,7 +1657,7 @@ async function saveNotes(selKey, value) {
   if (selKey === "main") {
     if (!state.plan.main) return;
     state.plan.main.notes = value;
-    await fetch(`/api/sessions/${state.sessionId}/main/notes`, {
+    await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/main/notes`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ notes: value }),
     });
@@ -1666,7 +1666,7 @@ async function saveNotes(selKey, value) {
     const r = state.plan.regions.find(r => r.id === id);
     if (!r) return;
     r.notes = value;
-    await fetch(`/api/sessions/${state.sessionId}/region/${id}`, {
+    await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/region/${id}`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ notes: value }),
     });
@@ -2481,14 +2481,14 @@ async function pushTintForKey(key, tint) {
       if (f) faceId = f.id;
     }
     if (faceId == null) return;
-    url = `/api/sessions/${state.sessionId}/topology/face/${faceId}/tint`;
+    url = `/api/sessions/${encodeURIComponent(state.sessionId)}/topology/face/${faceId}/tint`;
     body = { tint };
   } else if (key === "main") {
-    url = `/api/sessions/${state.sessionId}/main/tint`;
+    url = `/api/sessions/${encodeURIComponent(state.sessionId)}/main/tint`;
     body = { tint };
   } else if (key.startsWith("region:")) {
     const rid = parseInt(key.slice(7), 10);
-    url = `/api/sessions/${state.sessionId}/region/${rid}`;
+    url = `/api/sessions/${encodeURIComponent(state.sessionId)}/region/${rid}`;
     body = { tint };
   } else {
     return;  // columns / room don't support tint editing
@@ -2526,7 +2526,7 @@ async function pushTintForKey(key, tint) {
 
 async function pushPolygonForKey(key) {
   if (key === "room") {
-    const r = await fetch(`/api/sessions/${state.sessionId}/room`, {
+    const r = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/room`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ polygon: state.plan.room }),
     });
@@ -2537,7 +2537,7 @@ async function pushPolygonForKey(key) {
       else state.heatmaps.delete("room");
     }
   } else if (key === "main") {
-    const r = await fetch(`/api/sessions/${state.sessionId}/main`, {
+    const r = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/main`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ polygon: state.plan.main.polygon }),
     });
@@ -2546,13 +2546,13 @@ async function pushPolygonForKey(key) {
       state.plan.main = d.main;
       await refreshHeatmap("main", d.main);
       // relative_y on regions changed → reload plan
-      const planR = await fetch(`/api/sessions/${state.sessionId}/plan`);
+      const planR = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/plan`);
       state.plan = await planR.json();
     }
   } else if (key.startsWith("region:")) {
     const id = parseInt(key.slice(7), 10);
     const reg = state.plan.regions.find(r => r.id === id);
-    const r = await fetch(`/api/sessions/${state.sessionId}/region/${id}`, {
+    const r = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/region/${id}`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ polygon: reg.polygon }),
     });
@@ -2565,7 +2565,7 @@ async function pushPolygonForKey(key) {
     const id = parseInt(key.slice(7), 10);
     const obs = (state.plan.obstructions || []).find(o => o.id === id);
     if (!obs) return;
-    const r = await fetch(`/api/sessions/${state.sessionId}/obstruction/${id}`, {
+    const r = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/obstruction/${id}`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ polygon: obs.polygon }),
     });
@@ -2584,7 +2584,7 @@ async function pushPolygonForKey(key) {
     const id = parseInt(key.slice(10), 10);
     const iface = (state.plan.interfaces || []).find(i => i.id === id);
     if (!iface) return;
-    const r = await fetch(`/api/sessions/${state.sessionId}/interface/${id}`, {
+    const r = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/interface/${id}`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ polyline: iface.polyline }),
     });
@@ -2610,7 +2610,7 @@ async function pushPolygonForKey(key) {
 // ─── EXPORT ───────────────────────────────────────────────────────────────
 async function exportPlan() {
   if (!state.sessionId) return;
-  const r = await fetch(`/api/sessions/${state.sessionId}/export`);
+  const r = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/export`);
   const data = await r.json();
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
@@ -2661,7 +2661,7 @@ function pxPerCmFromSymbols() {
 async function loadSymbolsForSession() {
   if (!state.sessionId) return;
   try {
-    const r = await fetch(`/api/sessions/${state.sessionId}/symbols`);
+    const r = await fetch(`/api/sessions/${encodeURIComponent(state.sessionId)}/symbols`);
     if (!r.ok) {
       console.warn("symbols fetch failed:", r.status);
       return;
@@ -2823,6 +2823,26 @@ function refreshSymbolInfo() {
       + (typeof score === "number" ? ` · score ${score.toFixed(2)}` : "")
       + `</span></div>`
     : "";
+  // Two source-photo thumbnails — closest two contributing keyframes,
+  // each showing the SAM 3 polygon outlined (not filled) on the source
+  // image. The endpoint generates them lazily on first hit; the
+  // ``onerror`` handler hides them silently when the symbol predates
+  // the depth-projection rev (no per_frame_polygons saved → 404).
+  const sid = state.sessionId;
+  const thumbBase = sid
+    ? `/api/sessions/${encodeURIComponent(sid)}/symbols/${s.id}/thumbs`
+    : null;
+  const thumbsHtml = thumbBase
+    ? `<div class="sym-thumbs">`
+      + `  <img class="sym-thumb" alt="closest source view" loading="lazy"`
+      + `       src="${thumbBase}/0.jpg"`
+      + `       onerror="this.parentNode.classList.add('thumbs-empty'); this.style.display='none';">`
+      + `  <img class="sym-thumb" alt="second-closest source view" loading="lazy"`
+      + `       src="${thumbBase}/1.jpg"`
+      + `       onerror="this.style.display='none';">`
+      + `</div>`
+    : "";
+
   el.classList.remove("muted");
   el.classList.add("has-selection");
   el.innerHTML =
@@ -2830,6 +2850,7 @@ function refreshSymbolInfo() {
       + `<span class="legend-swatch" style="background:${def.color_hex || '#888'}"></span>`
       + `<span>${def.label || s.class} ${s.index}</span>`
     + `</div>`
+    + thumbsHtml
     + `<div class="sym-row"><span class="k">ID</span><span class="v">${s.id}</span></div>`
     + `<div class="sym-row"><span class="k">Index</span><span class="v">${s.index}</span></div>`
     + sizeRow
@@ -3045,7 +3066,7 @@ async function generateSymbols() {
   setServicesStatus("Running SAM 3 segmentation pipeline…", "");
   try {
     const r = await fetch(
-      `/api/sessions/${state.sessionId}/symbols/generate`,
+      `/api/sessions/${encodeURIComponent(state.sessionId)}/symbols/generate`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -3120,5 +3141,187 @@ async function loadFromUrlParam() {
   }
 }
 
+// ─── HEADER SCAN SWITCHER (dropdown) ──────────────────────────────────────
+// Lets the user jump to another scan without going back to the landing
+// page. Only shown in scans-dir mode; in default sessions/ mode the
+// header keeps the original [title • session • Export] layout.
+
+let _scanSwitcherCache = null;        // last /api/scans response
+let _scanSwitcherOpen = false;
+
+async function _scanSwitcherFetch() {
+  if (_scanSwitcherCache) return _scanSwitcherCache;
+  try {
+    const r = await fetch("/api/scans");
+    if (!r.ok) return null;
+    _scanSwitcherCache = await r.json();
+  } catch (e) {
+    console.warn("scan switcher fetch failed:", e);
+    return null;
+  }
+  return _scanSwitcherCache;
+}
+
+function _renderScanSwitcherMenu(data) {
+  const menu = document.getElementById("scan-switcher-menu");
+  if (!menu) return;
+  menu.innerHTML = "";
+
+  const meta = document.createElement("div");
+  meta.className = "menu-meta";
+  meta.textContent = `${(data.scans || []).length} scan(s) in ${data.scans_dir}`;
+  menu.appendChild(meta);
+
+  const current = state.sessionId;
+  for (const s of (data.scans || [])) {
+    const row = document.createElement("div");
+    const processed = s.has_plan && s.has_ceiling;
+    const isCurrent = s.session_id === current;
+    row.className = "menu-row"
+      + (isCurrent ? " current" : "")
+      + (!processed ? " unprocessed" : "");
+    const stateLabel = processed
+      ? (s.has_symbols ? "processed · symbols" : "processed")
+      : (s.raw_zip_count > 0
+          ? `${s.raw_zip_count} zip(s) — needs processing`
+          : "no source");
+    row.innerHTML =
+      `<span class="row-name">${s.session_id}</span>` +
+      `<span class="row-state ${processed ? "processed" : "unprocessed"}">${stateLabel}</span>`;
+    if (processed && !isCurrent) {
+      row.onclick = () => {
+        window.location.href =
+          "/?session=" + encodeURIComponent(s.session_id);
+      };
+    } else if (!processed) {
+      row.title =
+        "Run `ceiling-rcp-process \""
+        + data.scans_dir + "/" + s.session_id
+        + "\"` then refresh.";
+    }
+    menu.appendChild(row);
+  }
+
+  const footer = document.createElement("div");
+  footer.className = "menu-footer";
+  footer.innerHTML = `<a href="/">↩ Back to scan picker</a>`;
+  menu.appendChild(footer);
+}
+
+async function toggleScanSwitcher(forceState) {
+  const btn = document.getElementById("btn-switch-scan");
+  const menu = document.getElementById("scan-switcher-menu");
+  if (!btn || !menu) return;
+  const next = forceState != null ? !!forceState : !_scanSwitcherOpen;
+  if (next) {
+    // Always re-fetch on open so newly-processed scans appear without
+    // a hard reload — the cache is just a within-open-session memo.
+    _scanSwitcherCache = null;
+    const data = await _scanSwitcherFetch();
+    if (!data) return;
+    _renderScanSwitcherMenu(data);
+    menu.hidden = false;
+    btn.setAttribute("aria-expanded", "true");
+    _scanSwitcherOpen = true;
+  } else {
+    menu.hidden = true;
+    btn.setAttribute("aria-expanded", "false");
+    _scanSwitcherOpen = false;
+  }
+}
+
+async function initScanSwitcher() {
+  // Probe /api/scans once at boot. If the server is in scans-dir mode
+  // we reveal the switcher; otherwise the header stays as-is.
+  const data = await _scanSwitcherFetch();
+  if (!data || data.layout !== "scans") return;
+  const wrap = document.getElementById("scan-switcher");
+  const btn = document.getElementById("btn-switch-scan");
+  if (!wrap || !btn) return;
+  wrap.hidden = false;
+  btn.onclick = (e) => { e.stopPropagation(); toggleScanSwitcher(); };
+  // Click anywhere outside (or Esc) closes the menu.
+  document.addEventListener("click", (e) => {
+    if (!_scanSwitcherOpen) return;
+    if (wrap.contains(e.target)) return;
+    toggleScanSwitcher(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && _scanSwitcherOpen) toggleScanSwitcher(false);
+  });
+}
+
+// ─── SCAN PICKER (landing page) ───────────────────────────────────────────
+// In scans-dir mode (server launched with --scans-dir or
+// CEILING_RCP_SCANS_DIR set), the landing page lists every scan in the
+// folder so the user can pick one. The web upload form stays visible
+// only in default mode (sessions/) for backwards compatibility.
+
+async function loadScansList() {
+  try {
+    const r = await fetch("/api/scans");
+    if (!r.ok) return;
+    const data = await r.json();
+    const meta = document.getElementById("scans-meta");
+    const ul = document.getElementById("scans-list");
+    const section = document.getElementById("scans-section");
+    const upload = document.getElementById("upload-section");
+    if (!section || !ul) return;
+
+    // Only show the picker in scans-dir layout — keeps the existing
+    // upload-by-folder UX intact for the project-internal sessions/
+    // folder. Reading data.layout avoids a separate "is scans mode?"
+    // endpoint.
+    if (data.layout !== "scans") {
+      section.hidden = true;
+      return;
+    }
+    section.hidden = false;
+    if (upload) upload.hidden = true;
+
+    const scans = data.scans || [];
+    meta.textContent = scans.length
+      ? `${scans.length} scan(s) in ${data.scans_dir}`
+      : `No scans yet in ${data.scans_dir}`;
+
+    ul.innerHTML = "";
+    for (const s of scans) {
+      const li = document.createElement("li");
+      const processed = s.has_plan && s.has_ceiling;
+      const stateLabel = processed
+        ? (s.has_symbols ? "processed · with symbols" : "processed")
+        : (s.raw_zip_count > 0
+            ? `${s.raw_zip_count} zip(s) — needs processing`
+            : "no source files");
+      const stateCls = processed ? "processed" : "unprocessed";
+      li.className = processed ? "" : "unprocessed";
+      li.innerHTML =
+        `<span class="scan-name">${s.session_id}</span>` +
+        `<span class="scan-state ${stateCls}">${stateLabel}</span>`;
+      if (processed) {
+        li.onclick = () => {
+          window.location.href = "/?session=" + encodeURIComponent(s.session_id);
+        };
+        li.title = `Open ${s.session_id}`;
+      } else {
+        li.title =
+          "Run `ceiling-rcp-process \""
+          + data.scans_dir + "/" + s.session_id
+          + "\"` then refresh this page.";
+      }
+      ul.appendChild(li);
+    }
+  } catch (e) {
+    console.warn("scans-list fetch failed:", e);
+  }
+}
+
 resizeCanvas();
-loadFromUrlParam();
+loadFromUrlParam().then(() => {
+  // The header switcher is shown for every page (landing + open
+  // session), so probe scans-dir mode regardless. The sidebar picker
+  // is only shown on the landing page — once a session is open it
+  // would just duplicate the header dropdown.
+  initScanSwitcher();
+  if (!state.sessionId) loadScansList();
+});

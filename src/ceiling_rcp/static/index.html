@@ -3,18 +3,35 @@
 <head>
   <meta charset="utf-8">
   <title>ceiling-rcp</title>
-  <link rel="stylesheet" href="style.css?v=21">
+  <link rel="stylesheet" href="style.css?v=24">
 </head>
 <body>
   <header>
     <h1>ceiling-rcp</h1>
     <span id="session-label" class="muted">no session</span>
+    <div id="scan-switcher" class="scan-switcher" hidden>
+      <button id="btn-switch-scan" type="button" aria-haspopup="true"
+              aria-expanded="false">Switch scan ▾</button>
+      <div id="scan-switcher-menu" class="scan-switcher-menu" hidden></div>
+    </div>
     <span class="spacer"></span>
     <button id="btn-export" disabled>Export plan</button>
   </header>
 
   <main>
     <aside id="sidebar">
+      <section id="scans-section" hidden>
+        <h2>1. Pick a scan</h2>
+        <p class="muted" id="scans-meta">Loading…</p>
+        <ul id="scans-list" class="scans-list"></ul>
+        <p class="muted hint">
+          To add a new scan: drop the Polycam zips into a fresh
+          <code>&lt;scans dir&gt;/&lt;scan name&gt;/Polycam Outputs/</code>
+          folder, then run <code>ceiling-rcp-process</code> against it.
+          Refresh this page to see it.
+        </p>
+      </section>
+
       <section id="upload-section">
         <h2>1. Upload scan</h2>
         <p class="muted">For best reliability, run
@@ -256,6 +273,6 @@
     </aside>
   </main>
 
-  <script src="app.js?v=28"></script>
+  <script src="app.js?v=31"></script>
 </body>
 </html>

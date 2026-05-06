@@ -394,3 +394,116 @@ canvas {
 #services-status.warn { color: var(--warn); }
 #services-status.err  { color: var(--error); }
 #services-status.ok   { color: var(--ok); }
+
+/* ─── Selected-symbol thumbnails ─────────────────────────────────────── */
+/* Two source-photo crops (closest two contributing keyframes) shown
+   inside the Selected symbol card. Each is the raw rotated SAM 3 input
+   with the polygon outlined (not masked) in the symbol's class colour
+   so the user can sanity-check what SAM 3 actually saw. */
+.sym-thumbs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin: 8px 0 6px 0;
+}
+.sym-thumbs.thumbs-empty { display: none; }
+.sym-thumbs .sym-thumb {
+  width: 100%;
+  aspect-ratio: 3 / 4;             /* matches the 768 × 1024 portrait input */
+  object-fit: cover;
+  background: #0a0b0d;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  display: block;
+}
+
+/* ─── Scan picker (landing page) ─────────────────────────────────────── */
+.scans-list {
+  list-style: none; padding: 0; margin: 6px 0 12px 0;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.scans-list li {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--line); border-radius: 4px;
+  background: #1a1d20;
+  cursor: pointer;
+  font-size: 12px;
+}
+.scans-list li:hover { border-color: var(--accent); background: #1f2429; }
+.scans-list li .scan-name {
+  flex: 1; color: var(--text); font-weight: 500;
+}
+.scans-list li .scan-state {
+  color: var(--muted); font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.scans-list li .scan-state.unprocessed { color: var(--warn); }
+.scans-list li .scan-state.processed   { color: var(--ok); }
+.scans-list li.unprocessed { cursor: default; }
+.scans-list li.unprocessed:hover { border-color: var(--line); background: #1a1d20; }
+
+/* ─── Header scan switcher (dropdown) ──────────────────────────────────── */
+.scan-switcher { position: relative; }
+.scan-switcher button#btn-switch-scan {
+  background: #2a2c33; color: var(--text);
+  border: 1px solid #3a3d44;
+  padding: 4px 10px; border-radius: 3px;
+  font-size: 12px; cursor: pointer;
+}
+.scan-switcher button#btn-switch-scan:hover {
+  background: #3a3d44; border-color: #525a63;
+}
+.scan-switcher button#btn-switch-scan[aria-expanded="true"] {
+  background: #00838f; border-color: #00acc1; color: white;
+}
+.scan-switcher-menu {
+  position: absolute;
+  top: calc(100% + 4px); left: 0;
+  z-index: 100;
+  min-width: 280px; max-width: 420px;
+  max-height: 60vh; overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  padding: 4px;
+}
+.scan-switcher-menu .menu-meta {
+  padding: 6px 10px;
+  font-size: 11px; color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+.scan-switcher-menu .menu-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.scan-switcher-menu .menu-row:hover { background: #1f2429; }
+.scan-switcher-menu .menu-row.current {
+  background: #1f2a32; cursor: default;
+  border: 1px dashed var(--accent);
+}
+.scan-switcher-menu .menu-row.unprocessed {
+  cursor: default; opacity: 0.55;
+}
+.scan-switcher-menu .menu-row .row-name { flex: 1; color: var(--text); }
+.scan-switcher-menu .menu-row .row-state {
+  color: var(--muted); font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.scan-switcher-menu .menu-row .row-state.processed { color: var(--ok); }
+.scan-switcher-menu .menu-row .row-state.unprocessed { color: var(--warn); }
+.scan-switcher-menu .menu-footer {
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+.scan-switcher-menu .menu-footer a {
+  color: var(--accent); text-decoration: none;
+}
+.scan-switcher-menu .menu-footer a:hover { text-decoration: underline; }

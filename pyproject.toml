@@ -27,11 +27,21 @@ dev = [
     "matplotlib>=3.7",
     "scikit-image>=0.22",
 ]
+# `pip install ceiling-rcp[sam3]` pulls the runpod + roboflow inference
+# deps for the ceiling-services pipeline. Kept optional so a default
+# install of the main RCP app stays slim.
+sam3 = [
+    "runpod>=1.7",
+    "inference-sdk>=1.0",
+    "scikit-learn>=1.3",   # DBSCAN inside sam3_clusters.py
+    "requests>=2.31",
+]
 
 [project.scripts]
 ceiling-rcp = "ceiling_rcp.cli:main"
 ceiling-rcp-server = "ceiling_rcp.server:main"
 ceiling-rcp-init = "ceiling_rcp.init_session:main"
+ceiling-rcp-process = "ceiling_rcp.process_scan:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

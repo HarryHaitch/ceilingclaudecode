@@ -194,6 +194,15 @@ def symbols_from_clusters(
                     width_m=float(inst.get("width_m", 0.0)),
                     length_m=float(inst.get("length_m", 0.0)),
                     mean_mask_diameter_cm=float(inst.get("mean_mask_diameter_cm", 0.0)),
+                    # Per-frame contributing polygons in the rotated
+                    # 768 × 1024 SAM input coords (= same coords as the
+                    # saved per_frame/<id>/input.jpg). The viewer's
+                    # thumbnail endpoint reads these to outline the
+                    # detection on its source photo. Empty list when
+                    # the cluster summary doesn't carry this field
+                    # (older runs predating the depth-projection rev).
+                    per_frame_polygons=list(inst.get("per_frame_polygons") or []),
+                    centroid_xz_m=[float(v) for v in (inst.get("centroid_xz_m") or [0.0, 0.0])],
                 ),
             ))
             next_id += 1

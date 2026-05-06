@@ -52,8 +52,15 @@ PRELOAD_DIR = PACKAGE_DIR / "preload_assets"
 
 
 def session_symbols_path(session_dir: Path) -> Path:
-    """The canonical location of ``symbols.json`` inside a session."""
-    return session_dir / "out" / "symbols.json"
+    """The canonical location of ``symbols.json`` inside a session.
+
+    Honours ``CEILING_RCP_SCANS_DIR`` mode by writing into ``Processed
+    Outputs/`` instead of ``out/`` when that env var is set, so the
+    symbols document sits next to the rest of the processed artefacts
+    in the user-visible folder layout."""
+    import os as _os
+    out_subdir = "Processed Outputs" if _os.environ.get("CEILING_RCP_SCANS_DIR") else "out"
+    return session_dir / out_subdir / "symbols.json"
 
 
 def preload_symbols_path(session_id: str) -> Path:

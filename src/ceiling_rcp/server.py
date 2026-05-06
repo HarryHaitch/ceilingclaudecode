@@ -78,9 +78,52 @@ from .units import (
 
 
 # ─── PATHS ────────────────────────────────────────────────────────────────────
+#
+# Two layouts are supported, picked at startup via ``CEILING_RCP_SCANS_DIR``
+# (or the ``--scans-dir`` CLI flag passed to ``ceiling-rcp-server``):
+#
+#   • Default — sessions live under ``./sessions/<session_id>/`` with the
+#     hidden ``out/`` and ``upload/`` subdirs the FastAPI upload path
+#     produces. Backwards-compatible with every pre-Rev.1 session on disk.
+#
+#   • Scans-dir mode — each subfolder of ``CEILING_RCP_SCANS_DIR`` is
+#     treated as a session. The friendlier subdir names ``Processed
+#     Outputs/`` and ``Polycam Outputs/`` replace ``out/`` and ``upload/``
+#     so the user-visible Finder layout is self-explanatory. The folder
+#     name itself is the session id (URL-encoded by the frontend).
+#
+# Run-time switching between the two is intentional — different demos
+# (project-internal sessions vs. demo/Scans/) coexist without copying.
 
-SESSIONS_DIR = Path.cwd() / "sessions"
+import os as _os
+
 STATIC_DIR = Path(__file__).parent / "static"
+
+_SCANS_DIR_ENV = _os.environ.get("CEILING_RCP_SCANS_DIR")
+if _SCANS_DIR_ENV:
+    SESSIONS_DIR = Path(_SCANS_DIR_ENV).expanduser().resolve()
+    OUT_SUBDIR_NAME = "Processed Outputs"
+    UPLOAD_SUBDIR_NAME = "Polycam Outputs"
+    SESSIONS_LAYOUT = "scans"
+else:
+    SESSIONS_DIR = Path.cwd() / "sessions"
+    OUT_SUBDIR_NAME = "out"
+    UPLOAD_SUBDIR_NAME = "upload"
+    SESSIONS_LAYOUT = "default"
+
+
+def _out_dir(session_dir: Path) -> Path:
+    """Where the processor writes results (plan.json, ceiling.jpg, …).
+    Resolves to ``out/`` in the default layout and ``Processed Outputs/``
+    in scans-dir mode."""
+    return session_dir / OUT_SUBDIR_NAME
+
+
+def _upload_dir(session_dir: Path) -> Path:
+    """Where the user's source scan files live (extracted OBJ + textures
+    + keyframes). ``upload/`` in the default layout and ``Polycam
+    Outputs/`` in scans-dir mode."""
+    return session_dir / UPLOAD_SUBDIR_NAME
 
 
 def _session_dir(session_id: str) -> Path:
@@ -88,6 +131,38 @@ def _session_dir(session_id: str) -> Path:
     if not p.exists():
         raise HTTPException(404, f"unknown session {session_id}")
     return p
+
+
+def _list_sessions() -> list[dict]:
+    """Walk ``SESSIONS_DIR`` for everything that looks like a session
+    (has a ``<out>/plan.json``). Used by the scan-picker landing UI."""
+    if not SESSIONS_DIR.exists():
+        return []
+    out: list[dict] = []
+    for sd in sorted(SESSIONS_DIR.iterdir(), key=lambda p: p.name):
+        if not sd.is_dir():
+            continue
+        if sd.name.startswith("."):
+            continue
+        plan_path = _out_dir(sd) / "plan.json"
+        symbols_path = _out_dir(sd) / "symbols.json"
+        ceiling_path = _out_dir(sd) / "ceiling.jpg"
+        upload_dir = _upload_dir(sd)
+        # In scans-dir mode the upload folder may hold zips that haven't
+        # been extracted yet — surface that as ``raw_pending`` so the
+        # picker UI can offer a "Process" button.
+        zip_count = 0
+        if upload_dir.exists():
+            zip_count = sum(1 for f in upload_dir.iterdir()
+                            if f.is_file() and f.suffix.lower() == ".zip")
+        out.append({
+            "session_id": sd.name,
+            "has_plan": plan_path.exists(),
+            "has_symbols": symbols_path.exists(),
+            "has_ceiling": ceiling_path.exists(),
+            "raw_zip_count": zip_count,
+        })
+    return out
 
 
 # Schema version for plan.json. Bump when the on-disk shape changes; add a
@@ -210,7 +285,7 @@ def _recompute_relatives(plan: dict) -> None:
 
 def _load_plan(session_id: str) -> dict[str, Any]:
     sd = _session_dir(session_id)
-    plan_path = sd / "out" / "plan.json"
+    plan_path = _out_dir(sd) / "plan.json"
     if not plan_path.exists():
         raise HTTPException(409, "session not processed yet")
     return _migrate_plan(json.loads(plan_path.read_text()))
@@ -219,12 +294,12 @@ def _load_plan(session_id: str) -> dict[str, Any]:
 def _save_plan(session_id: str, plan: dict[str, Any]) -> None:
     plan["schema_version"] = PLAN_SCHEMA_VERSION
     sd = _session_dir(session_id)
-    (sd / "out" / "plan.json").write_text(json.dumps(plan, indent=2))
+    (_out_dir(sd) / "plan.json").write_text(json.dumps(plan, indent=2))
 
 
 def _load_height_map(session_id: str) -> tuple[np.ndarray, PlanGrid]:
     sd = _session_dir(session_id)
-    h = np.load(sd / "out" / "height.npy")
+    h = np.load(_out_dir(sd) / "height.npy")
     plan = _load_plan(session_id)
     g = plan["grid"]
     grid = PlanGrid(
@@ -390,8 +465,8 @@ def _do_render(
     Doesn't touch plan.json — caller is responsible for persisting.
     """
     sd = _session_dir(session_id)
-    upload = sd / "upload"
-    out = sd / "out"
+    upload = _upload_dir(sd)
+    out = _out_dir(sd)
     out.mkdir(parents=True, exist_ok=True)
 
     rep = inspect_folder(upload)
@@ -456,9 +531,9 @@ def process_session(
     No automatic segmentation — the user draws polygons by hand.
     """
     sd = _session_dir(session_id)
-    out = sd / "out"
+    out = _out_dir(sd)
     out.mkdir(parents=True, exist_ok=True)
-    upload = sd / "upload"
+    upload = _upload_dir(sd)
     rep = inspect_folder(upload)
     plan: dict[str, Any] = {
         "session_id": session_id,
@@ -794,6 +869,19 @@ def _muted_fill(hex_color: str, alpha: float = PLAN_FILL_ALPHA) -> tuple[float, 
 app = FastAPI(title="ceiling-rcp", version="0.2.0")
 
 
+@app.get("/api/scans")
+async def api_list_scans() -> dict:
+    """List every session/scan visible under ``SESSIONS_DIR``. Used by the
+    landing-page picker to let the user pick which scan to open."""
+    return {
+        "layout": SESSIONS_LAYOUT,
+        "scans_dir": str(SESSIONS_DIR),
+        "out_subdir": OUT_SUBDIR_NAME,
+        "upload_subdir": UPLOAD_SUBDIR_NAME,
+        "scans": _list_sessions(),
+    }
+
+
 @app.post("/api/sessions")
 async def api_create_session(
     files: list[UploadFile] = File(...),
@@ -802,8 +890,8 @@ async def api_create_session(
     sid = uuid.uuid4().hex[:12]
     sd = SESSIONS_DIR / sid
     sd.mkdir(parents=True, exist_ok=True)
-    _extract_upload(files, sd / "upload", paths=paths or None)
-    rep = inspect_folder(sd / "upload")
+    _extract_upload(files, _upload_dir(sd), paths=paths or None)
+    rep = inspect_folder(_upload_dir(sd))
     return {
         "session_id": sid,
         "report": {
@@ -985,7 +1073,7 @@ async def api_get_plan(session_id: str) -> dict:
 @app.get("/api/sessions/{session_id}/image/ceiling.jpg")
 async def api_ceiling_image(session_id: str) -> FileResponse:
     sd = _session_dir(session_id)
-    p = sd / "out" / "ceiling.jpg"
+    p = _out_dir(sd) / "ceiling.jpg"
     if not p.exists():
         raise HTTPException(404)
     return FileResponse(p)
@@ -3001,7 +3089,7 @@ async def api_pdf(session_id: str) -> Response:
     # ─── Title block (right strip) ──
     _draw_title_block(
         title_ax, project=project, session_id=session_id,
-        ortho_path=_session_dir(session_id) / "out" / "ceiling.jpg",
+        ortho_path=_out_dir(_session_dir(session_id)) / "ceiling.jpg",
         scale_ratio=scale_ratio, units=units,
         page_size_label=_page_size_label(page_code),
     )
@@ -3663,6 +3751,187 @@ async def api_delete_symbols(session_id: str) -> dict:
     return {"ok": True, "deleted": False}
 
 
+def _hex_to_bgr(hex_str: str) -> tuple[int, int, int]:
+    """#rrggbb → (b, g, r). Used to draw symbol-class outlines on JPGs."""
+    h = (hex_str or "#ffffff").lstrip("#")
+    if len(h) != 6:
+        return (255, 255, 255)
+    r = int(h[0:2], 16); g = int(h[2:4], 16); b = int(h[4:6], 16)
+    return (b, g, r)
+
+
+def _forward_rotate_to_input(poly_src: list[list[float]],
+                              src_h: int = 768) -> "np.ndarray":
+    """Inverse of ``sam3_clusters._back_rotate_point`` — turns a polygon
+    in original (1024 × 768 landscape) image coords back into the
+    rotated (768 × 1024 portrait) coords matching the saved
+    ``per_frame/<id>/input.jpg``. ``src_h`` is the original-image
+    height (= rotated-image width)."""
+    arr = np.asarray(poly_src, dtype=np.float32)
+    if arr.size == 0:
+        return arr
+    out = np.empty_like(arr)
+    out[:, 0] = (src_h - 1) - arr[:, 1]
+    out[:, 1] = arr[:, 0]
+    return out
+
+
+@app.get("/api/sessions/{session_id}/symbols/{symbol_id}/thumbs/{rank}.jpg")
+async def api_symbol_thumb(
+    session_id: str, symbol_id: int, rank: int,
+) -> Response:
+    """Two-thumbnail view for a single symbol: the SAM 3 polygon
+    outlined (not filled) on the closest two source photos that
+    contributed to the cluster. ``rank`` ∈ {0, 1} — 0 = closest camera,
+    1 = second-closest. Cached to disk per (symbol_id, rank); cache
+    invalidates on symbols.json mtime change."""
+    if rank not in (0, 1):
+        raise HTTPException(400, "rank must be 0 or 1")
+
+    sd = _session_dir(session_id)
+    sym_path = session_symbols_path(sd)
+    if not sym_path.exists():
+        raise HTTPException(404, "no symbols.json for this session")
+
+    # Cache hit?
+    thumbs_dir = sym_path.parent / "sam3" / "thumbs"
+    cache_path = thumbs_dir / f"{symbol_id}_{rank}.jpg"
+    if cache_path.exists() and cache_path.stat().st_mtime >= sym_path.stat().st_mtime:
+        return FileResponse(cache_path, media_type="image/jpeg")
+
+    doc = json.loads(sym_path.read_text())
+    sym = next((s for s in doc.get("symbols") or []
+                if int(s.get("id", -1)) == int(symbol_id)), None)
+    if sym is None:
+        raise HTTPException(404, f"unknown symbol id {symbol_id}")
+    src = sym.get("source") or {}
+    pfp: list[dict] = list(src.get("per_frame_polygons") or [])
+    if not pfp:
+        raise HTTPException(
+            404,
+            "this symbol has no per-frame polygons "
+            "(symbols.json predates the depth-projection rev — "
+            "re-run process_scan --sam3-skip-inference to regenerate)",
+        )
+
+    # Symbol's centroid in mesh-space metres → ARKit world for distance
+    # against camera positions.
+    centroid_xz_m = src.get("centroid_xz_m") or [0.0, 0.0]
+    grid = doc.get("grid") or {}
+    # Use the symbol's per-class colour for the outline.
+    classes = doc.get("symbol_classes") or {}
+    color_hex = (classes.get(sym.get("class")) or {}).get("color_hex", "#ffffff")
+    color_bgr = _hex_to_bgr(color_hex)
+
+    # Locate the keyframe cameras + per_frame photo dir for this scan.
+    scans_layout_kf = sd / UPLOAD_SUBDIR_NAME / "_extracted" / "keyframes"
+    cameras_dir = scans_layout_kf / "corrected_cameras"
+    per_frame_dir = sym_path.parent / "sam3" / "per_frame"
+    mesh_info_path = sd / UPLOAD_SUBDIR_NAME / "_extracted" / "mesh_info.json"
+    if not cameras_dir.exists() or not per_frame_dir.exists() or not mesh_info_path.exists():
+        raise HTTPException(
+            500,
+            "scan layout incomplete — needs Polycam Outputs/_extracted/keyframes/ "
+            "and Processed Outputs/sam3/per_frame/. Re-run process_scan to repopulate.",
+        )
+
+    # Sort candidate keyframes by 3D camera-to-symbol distance. The
+    # symbol's centroid_xz_m is in mesh space; cameras are in ARKit;
+    # we map mesh→ARKit via M_align_inv (load_alignment returns that).
+    from .sam3_projection import PolycamCamera, load_alignment
+    M_align_inv = load_alignment(mesh_info_path)
+    # Fill in the missing y component of the centroid using the
+    # height-map median in mesh space; ARKit has the same Y axis since
+    # the alignment matrix's Y row is identity for Polycam exports.
+    height_path = sd / OUT_SUBDIR_NAME / "height.npy"
+    cy_mesh = 1.0
+    if height_path.exists():
+        try:
+            h = np.load(height_path)
+            cy_mesh = float(np.nanmedian(h)) if np.isfinite(h).any() else 1.0
+        except Exception:
+            pass
+    c_mesh_h = np.array([centroid_xz_m[0], cy_mesh, centroid_xz_m[1], 1.0])
+    c_arkit = (M_align_inv @ c_mesh_h)[:3]
+
+    candidates: list[tuple[float, dict, "PolycamCamera"]] = []
+    for entry in pfp:
+        image_id = entry.get("image_id")
+        poly_src = entry.get("polygon_src") or []
+        if not image_id or not poly_src:
+            continue
+        cam_path = cameras_dir / f"{image_id}.json"
+        input_jpg = per_frame_dir / image_id / "input.jpg"
+        if not cam_path.exists() or not input_jpg.exists():
+            continue
+        try:
+            cam = PolycamCamera.from_json(cam_path)
+        except Exception:
+            continue
+        d = float(np.linalg.norm(c_arkit - cam.t))
+        candidates.append((d, entry, cam))
+
+    if not candidates:
+        raise HTTPException(
+            404,
+            "no usable per-frame photos (cameras or input.jpg missing on disk)",
+        )
+
+    candidates.sort(key=lambda x: x[0])
+    if rank >= len(candidates):
+        raise HTTPException(404, f"only {len(candidates)} candidate frame(s) for this symbol")
+
+    _, entry, cam = candidates[rank]
+    img_id = entry["image_id"]
+    poly_src = np.asarray(entry["polygon_src"], dtype=np.float32)
+
+    # Forward-rotate from original-frame (1024 × 768 landscape) coords
+    # into rotated-frame (768 × 1024 portrait) coords matching the
+    # saved input.jpg. ``src_h`` is the original-image height —
+    # always 768 for Polycam keyframes.
+    poly_rot = _forward_rotate_to_input(poly_src.tolist(), src_h=int(cam.H))
+
+    img = cv2.imread(str(per_frame_dir / img_id / "input.jpg"), cv2.IMREAD_COLOR)
+    if img is None:
+        raise HTTPException(500, f"failed to read input.jpg for {img_id}")
+    H, W = img.shape[:2]
+
+    # Crop window: 1.5× the polygon's bbox diagonal, centred on the
+    # polygon centroid. Min 256 px so small fixtures stay legible.
+    x_min = float(poly_rot[:, 0].min()); x_max = float(poly_rot[:, 0].max())
+    y_min = float(poly_rot[:, 1].min()); y_max = float(poly_rot[:, 1].max())
+    cx = 0.5 * (x_min + x_max); cy = 0.5 * (y_min + y_max)
+    bbox_diag = float(np.hypot(x_max - x_min, y_max - y_min))
+    side = int(max(256.0, 1.5 * bbox_diag))
+    x0 = max(0, int(round(cx - side / 2)))
+    y0 = max(0, int(round(cy - side / 2)))
+    x1 = min(W, x0 + side)
+    y1 = min(H, y0 + side)
+    # Reflow on edges.
+    if x1 - x0 < side:
+        x0 = max(0, x1 - side)
+    if y1 - y0 < side:
+        y0 = max(0, y1 - side)
+    crop = img[y0:y1, x0:x1].copy()
+    if crop.size == 0:
+        raise HTTPException(500, "thumbnail crop empty (polygon out of image bounds)")
+
+    # Outline (NOT fill) — class-coloured, 3 px stroke.
+    poly_in_crop = poly_rot.copy()
+    poly_in_crop[:, 0] -= x0; poly_in_crop[:, 1] -= y0
+    cv2.polylines(
+        crop, [poly_in_crop.astype(np.int32)],
+        isClosed=True, color=color_bgr, thickness=3, lineType=cv2.LINE_AA,
+    )
+
+    thumbs_dir.mkdir(parents=True, exist_ok=True)
+    ok, buf = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    if not ok:
+        raise HTTPException(500, "JPEG encoding failed")
+    cache_path.write_bytes(buf.tobytes())
+    return Response(content=buf.tobytes(), media_type="image/jpeg")
+
+
 @app.post("/api/sessions/{session_id}/symbols/generate")
 async def api_generate_symbols(
     session_id: str, payload: dict = Body(default={}),
@@ -3700,9 +3969,32 @@ def main() -> None:
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8000)
     p.add_argument("--reload", action="store_true")
+    p.add_argument(
+        "--scans-dir",
+        type=str,
+        default=None,
+        help=("Use a friendlier scans-folder layout instead of ./sessions/. "
+              "Each subfolder of <scans-dir> is treated as a session, with "
+              "'Polycam Outputs/' (the source) and 'Processed Outputs/' "
+              "(plan.json + symbols.json + ortho) as the per-scan layout. "
+              "Equivalent to setting CEILING_RCP_SCANS_DIR."),
+    )
     args = p.parse_args()
 
-    SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+    if args.scans_dir:
+        # Set the env var BEFORE uvicorn imports the app module — the
+        # path globals at the top of this file read CEILING_RCP_SCANS_DIR
+        # at import time.
+        _os.environ["CEILING_RCP_SCANS_DIR"] = str(
+            Path(args.scans_dir).expanduser().resolve()
+        )
+
+    # Re-resolve in case the env var was just set; the app module may
+    # already have loaded with the default layout otherwise.
+    sessions_dir = Path(_os.environ["CEILING_RCP_SCANS_DIR"]).expanduser().resolve() \
+        if _os.environ.get("CEILING_RCP_SCANS_DIR") else SESSIONS_DIR
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[ceiling-rcp] sessions directory: {sessions_dir}")
 
     import uvicorn
     uvicorn.run(

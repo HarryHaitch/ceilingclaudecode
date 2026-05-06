@@ -21,7 +21,7 @@ import sys
 import uuid
 from pathlib import Path
 
-from .server import SESSIONS_DIR, process_session
+from .server import SESSIONS_DIR, UPLOAD_SUBDIR_NAME, process_session
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -39,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sid = uuid.uuid4().hex[:12]
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
-    upload = SESSIONS_DIR / sid / "upload"
+    upload = SESSIONS_DIR / sid / UPLOAD_SUBDIR_NAME
     upload.mkdir(parents=True, exist_ok=True)
 
     # Skip the same heavyweights the web upload filters out: keyframes,
