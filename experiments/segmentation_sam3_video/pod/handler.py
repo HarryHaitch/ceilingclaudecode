@@ -95,6 +95,21 @@ def _polygon_bbox(poly: list[list[float]]) -> list[float]:
 app = FastAPI(title="sam3-video-handler", version="0.1")
 
 
+@app.exception_handler(Exception)
+async def _exc_handler(request, exc):
+    """Log the traceback AND return it in the response body so the
+    driver can surface it. Default FastAPI hides exceptions behind a
+    bare 500 with no body, which makes remote debugging painful."""
+    import traceback
+    tb = traceback.format_exc()
+    print("[handler] EXCEPTION:\n" + tb, flush=True)
+    return JSONResponse(
+        status_code=500,
+        content={"error": str(exc), "type": type(exc).__name__,
+                 "traceback": tb},
+    )
+
+
 @app.get("/info")
 def info() -> dict[str, Any]:
     return {

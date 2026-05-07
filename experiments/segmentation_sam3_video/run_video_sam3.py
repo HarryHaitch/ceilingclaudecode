@@ -91,9 +91,14 @@ HTTP_PORT = 9001
 def _wait_for_runtime_port(
     pod_id: str, *, port: int, timeout_s: int = 600,
     interval_s: float = 5.0,
-) -> tuple[str, int]:
-    """Poll runpod.get_pod() until the requested private port has a
-    public mapping. Returns (host, public_port)."""
+) -> None:
+    """Poll runpod.get_pod() until the requested private port appears
+    in the runtime ports list. RunPod's HTTPS proxy
+    (``https://<pod-id>-<port>.proxy.runpod.net``) routes through the
+    private-IP mapping just fine, so we don't need ``isIpPublic`` —
+    that flag is only set when the pod was created with TCP exposure
+    on a directly-routable IP, which community-cloud pods don't get.
+    """
     import runpod
     start = time.time()
     last_obs = "no observation yet"
@@ -103,8 +108,8 @@ def _wait_for_runtime_port(
             runtime = info.get("runtime") or {}
             ports = runtime.get("ports") or []
             for p in ports:
-                if p.get("privatePort") == port and p.get("isIpPublic"):
-                    return p["ip"], int(p["publicPort"])
+                if p.get("privatePort") == port:
+                    return
             last_obs = (
                 f"status={info.get('desiredStatus')} runtime="
                 f"{'present' if runtime else 'null'} "
@@ -184,7 +189,14 @@ def _post_chunk(
         },
         timeout=900,
     )
-    r.raise_for_status()
+    if r.status_code >= 400:
+        # Surface the handler's traceback when the call fails — without
+        # this the driver just sees "500 Internal Server Error" with no
+        # idea why.
+        body = r.text[:2000]
+        raise RuntimeError(
+            f"POST /sam3/video_segment {r.status_code}:\n{body}"
+        )
     return r.json()
 
 
@@ -210,9 +222,18 @@ def _parse_modes(modes_csv: str) -> list[tuple[str, dict]]:
             n = int(m.removeprefix("disjoint_"))
             out.append((m, {"kind": "disjoint", "n_chunks": n}))
         elif m.startswith("sliding_"):
+            # sliding_w32_s16 → split on '_' → ['sliding','w32','s16'].
+            # Match the W and S tokens by their full prefix+digits form
+            # so "sliding" doesn't accidentally match the "s<N>" filter.
             parts = m.split("_")
-            w = int(next(p for p in parts if p.startswith("w")).removeprefix("w"))
-            s = int(next(p for p in parts if p.startswith("s")).removeprefix("s"))
+            w = int(next(
+                p for p in parts
+                if p.startswith("w") and p[1:].isdigit()
+            ).removeprefix("w"))
+            s = int(next(
+                p for p in parts
+                if p.startswith("s") and p[1:].isdigit()
+            ).removeprefix("s"))
             out.append((m, {"kind": "sliding", "window": w, "stride": s}))
         else:
             raise ValueError(f"unrecognised mode: {m!r}")
@@ -344,6 +365,10 @@ def main() -> None:
         info = runpod.get_pod(pod_id)
         print(f"[driver] reusing pod {pod_id} "
               f"(status={info.get('desiredStatus')})", flush=True)
+        # Don't auto-terminate a pod the user wired up themselves. If
+        # the sweep crashes mid-way, we still want the pod alive so
+        # they can debug or re-run with --reuse-pod-id.
+        args.keep_pod = True
     else:
         print(f"[driver] using image {args.docker_image}", flush=True)
         pod = _create_pod_with_fallback(
@@ -361,9 +386,7 @@ def main() -> None:
 
     print(f"[driver] waiting for HTTP port {HTTP_PORT} on pod {pod_id}…",
           flush=True)
-    host, public_port = _wait_for_runtime_port(
-        pod_id, port=HTTP_PORT, timeout_s=900,
-    )
+    _wait_for_runtime_port(pod_id, port=HTTP_PORT, timeout_s=900)
     base_url = f"https://{pod_id}-{HTTP_PORT}.proxy.runpod.net"
     print(f"[driver] pod proxy URL: {base_url}", flush=True)
     info = _wait_for_http_health(base_url, timeout_s=900)
