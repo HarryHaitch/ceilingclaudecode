@@ -37,8 +37,14 @@ from PIL import Image
 
 # ─── Globals ──────────────────────────────────────────────────────────────
 
+# Cap memory fragmentation per the OOM hint from torch.cuda.
+import os as _os
+_os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
+# bfloat16 matches the upstream README example and is more memory-
+# stable than float16 for SAM 3's vision encoder activations.
+DTYPE = torch.bfloat16 if DEVICE == "cuda" else torch.float32
 UPLOAD_ROOT = Path("/tmp/sam3-video-uploads")
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 
@@ -197,9 +203,15 @@ def _propagate(
 ) -> list[dict]:
     """Run forward + backward propagation from the anchor frame."""
     _ensure_model_loaded()
+    # Keep raw frames + state on CPU and stream-to-GPU as needed —
+    # otherwise SAM 3 caches every frame's vision features on GPU and
+    # OOMs at ~30 frames on H100. Same params as the upstream README
+    # example.
     session = _processor.init_video_session(
         video=pil_chunk,
         inference_device=DEVICE,
+        processing_device="cpu",
+        video_storage_device="cpu",
         dtype=DTYPE,
     )
     _processor.add_text_prompt(session, text=prompt)
