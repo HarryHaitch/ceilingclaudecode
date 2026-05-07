@@ -68,6 +68,19 @@ def _ensure_model_loaded() -> None:
     print(f"[handler] hotstart_delay was {_model.hotstart_delay}; "
           "setting to 0 for sparse-keyframe video", flush=True)
     _model.hotstart_delay = 0
+    # Detection thresholds default to {0.5, 0.7, 0.8} which were tuned
+    # for dense COCO-style video. On Polycam ceiling shots, objects
+    # are smaller and concept matching less confident — drop these so
+    # we actually get detections to look at. The driver's --threshold
+    # filter further cuts low-quality matches in post.
+    print(f"[handler] thresholds: score_threshold_detection="
+          f"{_model.score_threshold_detection} -> 0.10, "
+          f"new_det_thresh={_model.new_det_thresh} -> 0.20, "
+          f"high_conf_thresh={_model.high_conf_thresh} -> 0.40",
+          flush=True)
+    _model.score_threshold_detection = 0.10
+    _model.new_det_thresh = 0.20
+    _model.high_conf_thresh = 0.40
     print(f"[handler] model loaded in {time.time() - t0:.1f}s",
           flush=True)
 
