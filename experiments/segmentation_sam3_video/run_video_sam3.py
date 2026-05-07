@@ -309,7 +309,14 @@ def main() -> None:
                     default=DEFAULT_IMAGE_MODE_RESULTS)
     ap.add_argument("--out-dir", type=Path,
                     default=Path(__file__).resolve().parent / "results")
-    ap.add_argument("--chunks", default="1,4,8,16,32,64")
+    # disjoint_1 (one 268-frame chunk) reliably exceeds Cloudflare's
+    # 100s proxy timeout — even a warm H100 takes ~2 min to propagate
+    # forward+backward through the full sequence. Skip by default.
+    # Pass --include-disjoint-1 to put it back (and brace for 524s).
+    ap.add_argument("--chunks", default="4,8,16,32,64")
+    ap.add_argument("--include-disjoint-1", action="store_true",
+                    help="add the 268-frame mode (often hits a 524 "
+                         "Cloudflare timeout — opt-in only)")
     ap.add_argument("--sliding", action="store_true", default=True)
     ap.add_argument("--no-sliding", dest="sliding", action="store_false")
     ap.add_argument("--sliding-window", type=int, default=32)
@@ -346,8 +353,11 @@ def main() -> None:
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
+    chunks = args.chunks
+    if args.include_disjoint_1 and "1," not in (chunks + ","):
+        chunks = "1," + chunks
     modes_csv = _build_default_modes(
-        args.chunks, args.sliding, args.sliding_window, args.sliding_stride,
+        chunks, args.sliding, args.sliding_window, args.sliding_stride,
     )
     modes = _parse_modes(modes_csv)
     print(f"[driver] modes: {[m[0] for m in modes]}", flush=True)
@@ -371,13 +381,27 @@ def main() -> None:
         args.keep_pod = True
     else:
         print(f"[driver] using image {args.docker_image}", flush=True)
+        # facebook/sam3 is a gated HuggingFace repo. The handler runs
+        # `from_pretrained` lazily on the first chunk POST, which 401s
+        # without a token. Read the local HF token (the one used for
+        # `huggingface-cli login`) and pass it through as env so the
+        # pod can authenticate. No fallback — without this, the SAM 3
+        # download fails immediately.
+        hf_token_path = Path.home() / ".cache" / "huggingface" / "token"
+        if not hf_token_path.exists():
+            raise SystemExit(
+                f"HF token not found at {hf_token_path}. "
+                "Run `huggingface-cli login` (must be a token with "
+                "access to the gated facebook/sam3 repo)."
+            )
+        hf_token = hf_token_path.read_text().strip()
         pod = _create_pod_with_fallback(
             runpod_api_key=runpod_key,
             cloud_type=args.cloud,
             container_disk_in_gb=args.container_disk_gb,
             image_name=args.docker_image,
             ports=f"{HTTP_PORT}/http",
-            env={},
+            env={"HF_TOKEN": hf_token, "HUGGING_FACE_HUB_TOKEN": hf_token},
             name="sam3-video-sweep",
         )
         pod_id = pod["id"]

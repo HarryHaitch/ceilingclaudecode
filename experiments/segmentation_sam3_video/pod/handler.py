@@ -95,6 +95,23 @@ def _polygon_bbox(poly: list[list[float]]) -> list[float]:
 app = FastAPI(title="sam3-video-handler", version="0.1")
 
 
+@app.on_event("startup")
+async def _preload_model() -> None:
+    """Load SAM 3 weights at server boot, not lazily on the first
+    chunk POST. Otherwise the first chunk pays ~60–90 s of weight
+    download on top of inference, and 268-frame propagations exceed
+    Cloudflare's 100 s proxy timeout.
+    """
+    try:
+        _ensure_model_loaded()
+    except Exception as e:
+        # Log but don't abort startup — /info still answers, and
+        # we can surface the error on the first chunk attempt.
+        import traceback
+        print(f"[handler] STARTUP MODEL LOAD FAILED:\n{traceback.format_exc()}",
+              flush=True)
+
+
 @app.exception_handler(Exception)
 async def _exc_handler(request, exc):
     """Log the traceback AND return it in the response body so the
