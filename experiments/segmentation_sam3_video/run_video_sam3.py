@@ -472,8 +472,23 @@ def main() -> None:
                     prompt=prompt,
                 )
                 all_tracks.extend(tracks)
+                diag_str = ""
+                diag = resp.get("diag", {})
+                if diag.get("first_frame"):
+                    ff = diag["first_frame"]
+                    diag_str = (
+                        f" [diag: n_obj={ff.get('n_object_ids')} "
+                        f"n_masks={ff.get('n_masks')} "
+                        f"scores={ff.get('sample_scores')} "
+                        f"tracker={ff.get('sample_tracker_scores')} "
+                        f"mask_shape={ff.get('first_mask_shape')} "
+                        f"mask_dtype={ff.get('first_mask_dtype')} "
+                        f"mask_minmax={ff.get('first_mask_minmax')}]"
+                    )
                 print(f"          → {len(tracks)} tracks "
-                      f"({resp.get('elapsed_s', 0):.1f}s)", flush=True)
+                      f"({resp.get('elapsed_s', 0):.1f}s, "
+                      f"kept={resp.get('n_kept_instances', 0)})"
+                      f"{diag_str}", flush=True)
 
             mode_elapsed = time.time() - mode_t0
             slug = prompt.replace(" ", "_")

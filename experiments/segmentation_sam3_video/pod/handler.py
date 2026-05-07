@@ -171,6 +171,7 @@ def _propagate(
     prompt: str,
     anchor_local_idx: int,
     threshold: float,
+    diag: dict | None = None,
 ) -> list[dict]:
     """Run forward + backward propagation from the anchor frame."""
     _ensure_model_loaded()
@@ -182,6 +183,7 @@ def _propagate(
     _processor.add_text_prompt(session, text=prompt)
 
     per_frame: dict[int, list[dict]] = {}
+    diag_first_logged = [False]
 
     def _consume(model_output) -> None:
         fidx = int(getattr(model_output, "frame_idx", -1))
@@ -196,6 +198,55 @@ def _propagate(
         )
         if isinstance(post, list):
             post = post[0] if post else model_output
+        # First-frame diagnostic dump — once per chunk, log the raw
+        # structure of the postprocessed output so we can see why we
+        # might be getting 0 instances.
+        if not diag_first_logged[0]:
+            diag_first_logged[0] = True
+            try:
+                obj_ids_d = list(getattr(post, "object_ids", []) or [])
+                id_to_mask_d = getattr(post, "obj_id_to_mask", {}) or {}
+                id_to_score_d = getattr(post, "obj_id_to_score", {}) or {}
+                id_to_tscore_d = getattr(post, "obj_id_to_tracker_score", {}) or {}
+                sample_scores = {
+                    str(k): float(v) for k, v in
+                    list(id_to_score_d.items())[:5]
+                }
+                sample_tscores = {
+                    str(k): float(v) for k, v in
+                    list(id_to_tscore_d.items())[:5]
+                }
+                mask_shape = None
+                mask_dtype = None
+                mask_minmax = None
+                if id_to_mask_d:
+                    first_mask = next(iter(id_to_mask_d.values()))
+                    mt = first_mask.detach().cpu()
+                    mask_shape = list(mt.shape)
+                    mask_dtype = str(mt.dtype)
+                    mask_minmax = [float(mt.min()), float(mt.max())]
+                payload = {
+                    "frame_idx": fidx,
+                    "post_type": type(post).__name__,
+                    "post_attrs": [a for a in dir(post)
+                                   if not a.startswith("_")][:30],
+                    "object_ids": obj_ids_d[:10],
+                    "n_object_ids": len(obj_ids_d),
+                    "n_masks": len(id_to_mask_d),
+                    "n_scores": len(id_to_score_d),
+                    "sample_scores": sample_scores,
+                    "sample_tracker_scores": sample_tscores,
+                    "first_mask_shape": mask_shape,
+                    "first_mask_dtype": mask_dtype,
+                    "first_mask_minmax": mask_minmax,
+                }
+                print(f"[handler] DIAG first-frame post: "
+                      f"{json.dumps(payload, default=str)}", flush=True)
+                if diag is not None and "first_frame" not in diag:
+                    diag["first_frame"] = payload
+            except Exception as e:
+                print(f"[handler] DIAG dump failed: {e}", flush=True)
+
         instances = []
         obj_ids = list(getattr(post, "object_ids", []) or [])
         id_to_mask = getattr(post, "obj_id_to_mask", {}) or {}
@@ -286,9 +337,14 @@ async def video_segment(payload: dict[str, Any]) -> dict[str, Any]:
         for i in frame_indices
     ]
     t0 = time.time()
-    per_frame = _propagate(pil_chunk, prompt, anchor_local, threshold)
+    diag: dict = {}
+    per_frame = _propagate(pil_chunk, prompt, anchor_local, threshold,
+                           diag=diag)
+    n_kept = sum(len(r["instances"]) for r in per_frame)
     return JSONResponse({
         "n_frames": len(frame_indices),
         "elapsed_s": time.time() - t0,
+        "n_kept_instances": n_kept,
+        "diag": diag,
         "per_frame": per_frame,
     })
