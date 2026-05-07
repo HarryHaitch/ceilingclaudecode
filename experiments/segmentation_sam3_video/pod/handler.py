@@ -211,87 +211,99 @@ def _propagate(
         fidx = int(getattr(model_output, "frame_idx", -1))
         if fidx < 0:
             return
-        post = _processor.postprocess_outputs(
+        # processor.postprocess_outputs returns a DICT (per the model
+        # card on facebook/sam3): keys are object_ids, scores, boxes,
+        # masks. Earlier code was reading attribute names off the raw
+        # Sam3VideoSegmentationOutput which silently returned defaults
+        # of empty list/dict — that's why we got 0 detections.
+        processed = _processor.postprocess_outputs(
             inference_session=session,
             model_outputs=model_output,
             original_sizes=[
                 [pil_chunk[fidx].size[1], pil_chunk[fidx].size[0]]
             ],
         )
-        if isinstance(post, list):
-            post = post[0] if post else model_output
-        # First-frame diagnostic dump — once per chunk, log the raw
-        # structure of the postprocessed output so we can see why we
-        # might be getting 0 instances.
+        object_ids = processed.get("object_ids", [])
+        scores = processed.get("scores", [])
+        boxes = processed.get("boxes", [])
+        masks = processed.get("masks", [])
+
+        # Convert tensors → python types up-front.
+        if hasattr(object_ids, "tolist"):
+            object_ids = object_ids.tolist()
+        if hasattr(scores, "tolist"):
+            scores = scores.tolist()
+        if hasattr(boxes, "tolist"):
+            boxes = boxes.tolist()
+        # Masks stay as tensor for now — will move to numpy per-mask.
+
         if not diag_first_logged[0]:
             diag_first_logged[0] = True
             try:
-                obj_ids_d = list(getattr(post, "object_ids", []) or [])
-                id_to_mask_d = getattr(post, "obj_id_to_mask", {}) or {}
-                id_to_score_d = getattr(post, "obj_id_to_score", {}) or {}
-                id_to_tscore_d = getattr(post, "obj_id_to_tracker_score", {}) or {}
-                sample_scores = {
-                    str(k): float(v) for k, v in
-                    list(id_to_score_d.items())[:5]
-                }
-                sample_tscores = {
-                    str(k): float(v) for k, v in
-                    list(id_to_tscore_d.items())[:5]
-                }
-                mask_shape = None
-                mask_dtype = None
+                mask_shape = (
+                    list(masks.shape) if hasattr(masks, "shape") else None
+                )
+                mask_dtype = (
+                    str(masks.dtype) if hasattr(masks, "dtype") else None
+                )
                 mask_minmax = None
-                if id_to_mask_d:
-                    first_mask = next(iter(id_to_mask_d.values()))
-                    mt = first_mask.detach().cpu()
-                    mask_shape = list(mt.shape)
-                    mask_dtype = str(mt.dtype)
+                if hasattr(masks, "min") and len(masks) > 0:
+                    mt = masks if not hasattr(masks, "detach") else masks.detach().cpu()
                     mask_minmax = [float(mt.min()), float(mt.max())]
                 payload = {
                     "frame_idx": fidx,
-                    "post_type": type(post).__name__,
-                    "post_attrs": [a for a in dir(post)
-                                   if not a.startswith("_")][:30],
-                    "object_ids": obj_ids_d[:10],
-                    "n_object_ids": len(obj_ids_d),
-                    "n_masks": len(id_to_mask_d),
-                    "n_scores": len(id_to_score_d),
-                    "sample_scores": sample_scores,
-                    "sample_tracker_scores": sample_tscores,
-                    "first_mask_shape": mask_shape,
-                    "first_mask_dtype": mask_dtype,
-                    "first_mask_minmax": mask_minmax,
+                    "n_object_ids": len(object_ids),
+                    "object_ids": object_ids[:10],
+                    "scores": scores[:10],
+                    "boxes_shape": (
+                        list(boxes.shape)
+                        if hasattr(boxes, "shape")
+                        else (None if boxes is None
+                              else f"list[{len(boxes)}]")
+                    ),
+                    "masks_shape": mask_shape,
+                    "masks_dtype": mask_dtype,
+                    "masks_minmax": mask_minmax,
                 }
                 print(f"[handler] DIAG first-frame post: "
                       f"{json.dumps(payload, default=str)}", flush=True)
                 if diag is not None and "first_frame" not in diag:
                     diag["first_frame"] = payload
             except Exception as e:
-                print(f"[handler] DIAG dump failed: {e}", flush=True)
+                import traceback
+                print(f"[handler] DIAG dump failed: {e}\n"
+                      f"{traceback.format_exc()}", flush=True)
 
         instances = []
-        obj_ids = list(getattr(post, "object_ids", []) or [])
-        id_to_mask = getattr(post, "obj_id_to_mask", {}) or {}
-        id_to_score = getattr(post, "obj_id_to_score", {}) or {}
-        for oid in obj_ids:
-            score = float(id_to_score.get(oid, 0.0))
+        for i, oid in enumerate(object_ids):
+            score = float(scores[i]) if i < len(scores) else 0.0
             if score < threshold:
                 continue
-            mask_t = id_to_mask.get(oid)
+            # masks is a tensor of shape (N, H, W) at original resolution.
+            mask_t = masks[i] if i < len(masks) else None
             if mask_t is None:
                 continue
-            mask_np = mask_t.detach().cpu().numpy()
+            if hasattr(mask_t, "detach"):
+                mask_np = mask_t.detach().cpu().numpy()
+            else:
+                mask_np = np.asarray(mask_t)
             while mask_np.ndim > 2 and mask_np.shape[0] == 1:
                 mask_np = mask_np[0]
             mask_bin = (mask_np > 0).astype(np.uint8)
             poly, area_px = _mask_to_polygon(mask_bin)
             if not poly or area_px < 8:
                 continue
+            # Boxes come back already in XYXY absolute coords.
+            bbox: list[float]
+            if hasattr(boxes, "shape") and i < len(boxes):
+                bbox = [float(x) for x in boxes[i]]
+            else:
+                bbox = _polygon_bbox(poly)
             instances.append({
                 "obj_id": int(oid),
                 "score": score,
                 "polygon": poly,
-                "bbox": _polygon_bbox(poly),
+                "bbox": bbox,
                 "area_px": area_px,
             })
         if instances:

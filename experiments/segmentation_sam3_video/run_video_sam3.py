@@ -478,12 +478,9 @@ def main() -> None:
                     ff = diag["first_frame"]
                     diag_str = (
                         f" [diag: n_obj={ff.get('n_object_ids')} "
-                        f"n_masks={ff.get('n_masks')} "
-                        f"scores={ff.get('sample_scores')} "
-                        f"tracker={ff.get('sample_tracker_scores')} "
-                        f"mask_shape={ff.get('first_mask_shape')} "
-                        f"mask_dtype={ff.get('first_mask_dtype')} "
-                        f"mask_minmax={ff.get('first_mask_minmax')}]"
+                        f"scores={ff.get('scores')} "
+                        f"masks_shape={ff.get('masks_shape')} "
+                        f"masks_minmax={ff.get('masks_minmax')}]"
                     )
                 print(f"          → {len(tracks)} tracks "
                       f"({resp.get('elapsed_s', 0):.1f}s, "
