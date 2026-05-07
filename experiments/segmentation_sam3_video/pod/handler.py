@@ -309,20 +309,21 @@ def _propagate(
         if instances:
             per_frame[fidx] = instances
 
+    # Forward-only propagation from frame 0. Earlier code did
+    # bidirectional from a "densest" anchor frame, but that doubles
+    # the per-chunk inference time and reliably exceeded Cloudflare's
+    # 100s proxy timeout for 67-frame chunks. SAM 3's documented
+    # usage runs forward from frame 0 — the model auto-detects new
+    # concept matches as they enter later frames, so we don't need
+    # backward propagation. anchor_local_idx is now ignored for
+    # parity with how the upstream model was trained.
     with torch.no_grad():
         for out in _model.propagate_in_video_iterator(
             inference_session=session,
-            start_frame_idx=anchor_local_idx,
+            start_frame_idx=0,
             reverse=False,
         ):
             _consume(out)
-        if anchor_local_idx > 0:
-            for out in _model.propagate_in_video_iterator(
-                inference_session=session,
-                start_frame_idx=anchor_local_idx,
-                reverse=True,
-            ):
-                _consume(out)
 
     return [
         {"frame_idx_local": fidx, "instances": insts}

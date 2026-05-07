@@ -309,11 +309,12 @@ def main() -> None:
                     default=DEFAULT_IMAGE_MODE_RESULTS)
     ap.add_argument("--out-dir", type=Path,
                     default=Path(__file__).resolve().parent / "results")
-    # disjoint_1 (one 268-frame chunk) reliably exceeds Cloudflare's
-    # 100s proxy timeout — even a warm H100 takes ~2 min to propagate
-    # forward+backward through the full sequence. Skip by default.
-    # Pass --include-disjoint-1 to put it back (and brace for 524s).
-    ap.add_argument("--chunks", default="4,8,16,32,64")
+    # disjoint_1 (one 268-frame chunk) and disjoint_4 (67 frames per
+    # chunk) reliably exceed Cloudflare's 100 s proxy timeout. Even
+    # forward-only propagation through 67 frames takes ~80–120 s on
+    # H100. Default sweep starts at disjoint_8 (~34 frames per
+    # chunk, ~40–60 s) which fits inside the proxy budget.
+    ap.add_argument("--chunks", default="8,16,32,64")
     ap.add_argument("--include-disjoint-1", action="store_true",
                     help="add the 268-frame mode (often hits a 524 "
                          "Cloudflare timeout — opt-in only)")
