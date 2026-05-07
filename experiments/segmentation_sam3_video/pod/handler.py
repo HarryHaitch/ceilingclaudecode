@@ -203,15 +203,12 @@ def _propagate(
 ) -> list[dict]:
     """Run forward + backward propagation from the anchor frame."""
     _ensure_model_loaded()
-    # Keep raw frames + state on CPU and stream-to-GPU as needed —
-    # otherwise SAM 3 caches every frame's vision features on GPU and
-    # OOMs at ~30 frames on H100. Same params as the upstream README
-    # example.
+    # GPU storage keeps inference fast (no per-frame CPU↔GPU
+    # transfers). The driver caps chunk size at ≤17 frames so the
+    # vision-features cache fits comfortably on H100 (~94 GB).
     session = _processor.init_video_session(
         video=pil_chunk,
         inference_device=DEVICE,
-        processing_device="cpu",
-        video_storage_device="cpu",
         dtype=DTYPE,
     )
     _processor.add_text_prompt(session, text=prompt)

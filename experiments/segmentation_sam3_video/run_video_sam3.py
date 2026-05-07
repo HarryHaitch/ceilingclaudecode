@@ -309,19 +309,18 @@ def main() -> None:
                     default=DEFAULT_IMAGE_MODE_RESULTS)
     ap.add_argument("--out-dir", type=Path,
                     default=Path(__file__).resolve().parent / "results")
-    # disjoint_1 (one 268-frame chunk) and disjoint_4 (67 frames per
-    # chunk) reliably exceed Cloudflare's 100 s proxy timeout. Even
-    # forward-only propagation through 67 frames takes ~80–120 s on
-    # H100. Default sweep starts at disjoint_8 (~34 frames per
-    # chunk, ~40–60 s) which fits inside the proxy budget.
-    ap.add_argument("--chunks", default="8,16,32,64")
+    # SAM 3 video caches every frame's vision features in GPU memory.
+    # Empirically: 17-frame chunks (disjoint_16) fit comfortably on
+    # H100 NVL (94 GB) and propagate in ~30 s; 34-frame chunks
+    # (disjoint_8) OOM. So 16/32/64 are the safe options.
+    ap.add_argument("--chunks", default="16,32,64")
     ap.add_argument("--include-disjoint-1", action="store_true",
                     help="add the 268-frame mode (often hits a 524 "
                          "Cloudflare timeout — opt-in only)")
     ap.add_argument("--sliding", action="store_true", default=True)
     ap.add_argument("--no-sliding", dest="sliding", action="store_false")
-    ap.add_argument("--sliding-window", type=int, default=32)
-    ap.add_argument("--sliding-stride", type=int, default=16)
+    ap.add_argument("--sliding-window", type=int, default=16)
+    ap.add_argument("--sliding-stride", type=int, default=8)
     ap.add_argument("--threshold", type=float, default=0.5)
     ap.add_argument("--prompts", default="ceiling item,light,vent")
     ap.add_argument("--max-frames", type=int, default=0,
