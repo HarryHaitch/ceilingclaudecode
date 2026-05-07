@@ -59,6 +59,15 @@ def _ensure_model_loaded() -> None:
         device=DEVICE, dtype=DTYPE,
     )
     _model.eval()
+    # SAM 3 video's "hotstart" buffers the first N frames and rejects
+    # any object whose track isn't consistent across them. That's the
+    # right behaviour for dense video where every frame is ~30 ms
+    # apart — but Polycam keyframes have multi-second viewpoint jumps
+    # between consecutive frames, so EVERY object gets filtered out.
+    # Disable it so detections always reach the output.
+    print(f"[handler] hotstart_delay was {_model.hotstart_delay}; "
+          "setting to 0 for sparse-keyframe video", flush=True)
+    _model.hotstart_delay = 0
     print(f"[handler] model loaded in {time.time() - t0:.1f}s",
           flush=True)
 
