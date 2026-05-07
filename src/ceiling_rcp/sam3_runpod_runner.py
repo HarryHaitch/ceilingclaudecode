@@ -108,25 +108,44 @@ def _arm_cleanup_hooks() -> None:
 def _create_pod_with_fallback(
     *,
     runpod_api_key: str,
-    roboflow_api_key: str,
+    roboflow_api_key: str = "",
     cloud_type: str,
     container_disk_in_gb: int = 20,
+    image_name: str = DOCKER_IMAGE,
+    ports: str | None = None,
+    env: dict[str, str] | None = None,
+    name: str = "sam3-ceiling-rcp",
+    docker_args: str = "",
 ) -> dict:
+    """Create a RunPod GPU pod, walking the GPU_FALLBACKS list.
+
+    Defaults preserve the image-mode SAM 3 behaviour exactly. The new
+    SAM 3 video-tracking experiment (under
+    ``experiments/segmentation_sam3_video/``) overrides ``image_name``
+    to a stock PyTorch image, ``ports`` to ``22/tcp`` for SSH, and
+    ``env`` to whatever it needs.
+    """
     import runpod
     runpod.api_key = runpod_api_key
+
+    if ports is None:
+        ports = f"{PORT}/http"
+    if env is None:
+        env = {"ROBOFLOW_API_KEY": roboflow_api_key} if roboflow_api_key else {}
 
     last_err: Optional[Exception] = None
     for gpu in GPU_FALLBACKS:
         print(f"[runpod] requesting {gpu} on {cloud_type} cloud…", flush=True)
         try:
             pod = runpod.create_pod(
-                name="sam3-ceiling-rcp",
-                image_name=DOCKER_IMAGE,
+                name=name,
+                image_name=image_name,
                 gpu_type_id=gpu,
                 cloud_type=cloud_type,
                 container_disk_in_gb=container_disk_in_gb,
-                ports=f"{PORT}/http",
-                env={"ROBOFLOW_API_KEY": roboflow_api_key},
+                ports=ports,
+                env=env,
+                docker_args=docker_args,
             )
             print(f"[runpod] got {gpu}: id={pod.get('id')}", flush=True)
             return pod
@@ -587,4 +606,24 @@ __all__ = [
     "GPU_FALLBACKS",
     "DEFAULT_RUNPOD_KEY",
     "DEFAULT_ROBOFLOW_KEY",
+    # Pod-lifecycle helpers shared with the SAM 3 video-tracking experiment.
+    "_create_pod_with_fallback",
+    "_wait_for_health",
+    "_arm_cleanup_hooks",
+    "_cleanup_pod",
 ]
+
+
+def set_pod_to_cleanup(pod_id: str | None, *, terminate: bool = True) -> None:
+    """Register a pod id for the atexit/signal-handler cleanup.
+
+    Exposed for callers that don't go through ``_run_inference_runpod``
+    but still want the same paranoid cleanup. Pass ``pod_id=None`` to
+    clear the registration (e.g. after ``--keep-pod``).
+    """
+    global _pod_id_to_cleanup, _terminate_on_exit
+    _pod_id_to_cleanup = pod_id
+    _terminate_on_exit = terminate
+
+
+__all__.append("set_pod_to_cleanup")
